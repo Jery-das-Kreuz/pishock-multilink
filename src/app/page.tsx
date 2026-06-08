@@ -45,22 +45,22 @@ function extractPiShockLinkId(input: string): string {
   try {
     url = new URL(trimmed);
   } catch {
-    throw new Error("Bitte gib eine gültige PiShock-LinkControl-URL ein.");
+    throw new Error("Please enter a valid PiShock LinkControl URL.");
   }
 
   if (url.hostname !== "pishock.com" && url.hostname !== "www.pishock.com") {
-    throw new Error("Nur Links von pishock.com sind erlaubt.");
+    throw new Error("Only pishock.com links are allowed.");
   }
 
   if (!url.hash.startsWith("#/LinkControl")) {
-    throw new Error("Der Link muss ein PiShock LinkControl-Link sein.");
+    throw new Error("The link must be a PiShock LinkControl link.");
   }
 
   const hashUrl = new URL(url.hash.slice(1), "https://pishock.com");
   const id = hashUrl.searchParams.get("id");
 
   if (!id || !uuidRegex.test(id)) {
-    throw new Error("Im Link wurde keine gültige Link-ID gefunden.");
+    throw new Error("No valid link ID was found in the link.");
   }
 
   return id;
@@ -110,19 +110,19 @@ export default function Home() {
 
     try {
       if (links.length >= 10) {
-        throw new Error("Maximal 10 Links pro Bundle sind erlaubt.");
+        throw new Error("A maximum of 10 links per bundle is allowed.");
       }
 
       const uuid = extractPiShockLinkId(input);
 
       if (links.some((link) => link.uuid.toLowerCase() === uuid.toLowerCase())) {
-        throw new Error("Dieser Link wurde bereits hinzugefügt.");
+        throw new Error("This link has already been added.");
       }
 
       const response = await fetch(`https://api.pishock.com/Links/${uuid}`);
 
       if (!response.ok) {
-        throw new Error(`PiShock API Fehler: ${response.status}`);
+        throw new Error(`PiShock API error: ${response.status}`);
       }
 
       const data = (await response.json()) as PiShockLinkInfo;
@@ -139,7 +139,7 @@ export default function Home() {
       setInput("");
       setCustomName("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(err instanceof Error ? err.message : "Unknown error.");
     } finally {
       setLoading(false);
     }
@@ -156,7 +156,7 @@ export default function Home() {
 
     try {
       if (links.length === 0) {
-        throw new Error("Füge zuerst mindestens einen Link hinzu.");
+        throw new Error("Add at least one link first.");
       }
 
       const response = await fetch("/api/bundles", {
@@ -176,7 +176,7 @@ export default function Home() {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || "Bundle konnte nicht erstellt werden.");
+        throw new Error(result.error || "Bundle could not be created.");
       }
 
       const absoluteUrl = `${window.location.origin}${result.path}`;
@@ -189,7 +189,7 @@ await navigator.clipboard.writeText(absoluteUrl);
 
       await navigator.clipboard.writeText(absoluteUrl);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unbekannter Fehler.");
+      setError(err instanceof Error ? err.message : "Unknown error.");
     } finally {
       setCreating(false);
     }
@@ -201,18 +201,17 @@ await navigator.clipboard.writeText(absoluteUrl);
         <header>
           <h1 className="text-3xl font-bold">PiShock Multi-Link Builder</h1>
           <p className="mt-3 max-w-2xl text-sm text-zinc-400">
-            Füge mehrere PiShock LinkControl-Links hinzu. Die Seite prüft jeden
-            Link über die öffentlichen Metadaten und erstellt daraus lokal eine
-            Bundle-Vorschau.
+            Add multiple PiShock LinkControl links. The page validates each link
+            against public metadata and builds a local bundle preview.
           </p>
         </header>
 
         <section className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
-          <h2 className="text-xl font-semibold">Bundle erstellen</h2>
+          <h2 className="text-xl font-semibold">Create bundle</h2>
 
           <div className="mt-5 grid gap-4">
             <label className="grid gap-2">
-              <span className="text-sm text-zinc-300">Bundle-Titel</span>
+              <span className="text-sm text-zinc-300">Bundle title</span>
               <input
                 value={bundleTitle}
                 onChange={(event) => setBundleTitle(event.target.value)}
@@ -222,17 +221,17 @@ await navigator.clipboard.writeText(absoluteUrl);
 
             <div className="grid gap-4 md:grid-cols-[1fr_2fr_auto]">
               <label className="grid gap-2">
-                <span className="text-sm text-zinc-300">Eigener Name</span>
+                <span className="text-sm text-zinc-300">Custom name</span>
                 <input
                   value={customName}
                   onChange={(event) => setCustomName(event.target.value)}
-                  placeholder="z. B. Left Arm"
+                  placeholder="e.g. Left Arm"
                   className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
                 />
               </label>
 
               <label className="grid gap-2">
-                <span className="text-sm text-zinc-300">PiShock-Link</span>
+                <span className="text-sm text-zinc-300">PiShock link</span>
                 <input
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
@@ -247,7 +246,7 @@ await navigator.clipboard.writeText(absoluteUrl);
                   disabled={loading}
                   className="w-full rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loading ? "Prüfe..." : "Hinzufügen"}
+                  {loading ? "Checking..." : "Add"}
                 </button>
               </div>
             </div>
@@ -265,7 +264,7 @@ await navigator.clipboard.writeText(absoluteUrl);
             <div>
               <h2 className="text-xl font-semibold">{bundleTitle}</h2>
               <p className="mt-1 text-sm text-zinc-400">
-                {links.length} von 10 Links hinzugefügt
+                {links.length} of 10 links added
               </p>
             </div>
 
@@ -274,11 +273,11 @@ await navigator.clipboard.writeText(absoluteUrl);
               disabled={links.length === 0 || creating}
               className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {creating ? "Erstelle..." : "Bundle-Link erstellen"}
+              {creating ? "Creating..." : "Create bundle link"}
             </button>
             {shareUrl && (
               <div className="mt-5 rounded-xl border border-green-800 bg-green-950 p-4 text-sm text-green-100">
-                <div className="font-semibold">Bundle erstellt und Link kopiert:</div>
+                <div className="font-semibold">Bundle created and link copied:</div>
                 <a
                   href={shareUrl}
                   target="_blank"
@@ -291,7 +290,7 @@ await navigator.clipboard.writeText(absoluteUrl);
             )}
             {manageUrl && (
               <div className="mt-4 rounded-xl border border-yellow-800 bg-yellow-950 p-4 text-sm text-yellow-100">
-                <div className="font-semibold">Privater Creator-Link:</div>
+                <div className="font-semibold">Private creator link:</div>
                 <a
                   href={manageUrl}
                   target="_blank"
@@ -301,7 +300,7 @@ await navigator.clipboard.writeText(absoluteUrl);
                   {manageUrl}
                 </a>
                 <p className="mt-2 text-xs text-yellow-200">
-                  Diesen Link nicht öffentlich teilen. Damit kann das Bundle später verwaltet werden.
+                  Do not share this link publicly. It allows the bundle to be managed later.
                 </p>
               </div>
             )}
@@ -309,7 +308,7 @@ await navigator.clipboard.writeText(absoluteUrl);
 
           {links.length === 0 ? (
             <div className="mt-5 rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-              Noch keine Links hinzugefügt.
+              No links added yet.
             </div>
           ) : (
             <div className="mt-5 grid gap-4">
@@ -356,7 +355,7 @@ function LinkCard({
           </div>
 
           <p className="mt-1 text-sm text-zinc-400">
-            Offizieller Name: {link.data.Name}
+            Official name: {link.data.Name}
           </p>
 
           <p className="mt-2 break-all font-mono text-xs text-zinc-500">
@@ -371,36 +370,36 @@ function LinkCard({
             rel="noopener noreferrer"
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500"
           >
-            Öffnen
+            Open
           </a>
 
           <button
             onClick={onRemove}
             className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800"
           >
-            Entfernen
+            Remove
           </button>
         </div>
       </div>
 
       {disabled && (
         <div className="mt-4 rounded-lg border border-yellow-800 bg-yellow-950 px-4 py-3 text-sm text-yellow-100">
-          Dieser Link ist für No-Login-Nutzung problematisch:{" "}
-          {link.data.Paused && "Link ist pausiert. "}
-          {link.data.ForceLogin && "Force Login ist aktiviert. "}
+          This link may be problematic for no-login use: {" "}
+          {link.data.Paused && "The link is paused. "}
+          {link.data.ForceLogin && "Force login is enabled. "}
         </div>
       )}
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <InfoBox
           label="Shock"
-          value={link.data.ShockEnabled ? "Erlaubt" : "Aus"}
+          value={link.data.ShockEnabled ? "Enabled" : "Off"}
         />
         <InfoBox
           label="Vibrate"
-          value={link.data.VibrateEnabled ? "Erlaubt" : "Aus"}
+          value={link.data.VibrateEnabled ? "Enabled" : "Off"}
         />
-        <InfoBox label="Beep" value={link.data.BeepEnabled ? "Erlaubt" : "Aus"} />
+        <InfoBox label="Beep" value={link.data.BeepEnabled ? "Enabled" : "Off"} />
         <InfoBox label="Max Intensity" value={link.data.MaxIntensity} />
         <InfoBox
           label="Max Duration"
@@ -410,11 +409,11 @@ function LinkCard({
           label="Remaining"
           value={
             link.data.RemainingActivations === -1
-              ? "Unbegrenzt"
+              ? "Unlimited"
               : link.data.RemainingActivations
           }
         />
-        <InfoBox label="Expiry" value={link.data.Expiry ?? "Keine"} />
+        <InfoBox label="Expiry" value={link.data.Expiry ?? "None"} />
         <InfoBox label="LinkId" value={link.data.LinkId} />
       </div>
     </article>
