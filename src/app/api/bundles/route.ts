@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { hashAccessPassword } from "@/lib/accessPassword";
 
 type PiShockLinkInfo = {
   LinkId: number;
@@ -25,6 +26,7 @@ type PiShockLinkInfo = {
 
 const createBundleSchema = z.object({
   title: z.string().max(80).optional(),
+  accessPassword: z.string().min(8).max(100).optional(),
   links: z
     .array(
       z.object({
@@ -109,6 +111,13 @@ export async function POST(request: Request) {
           remainingActivations: info.RemainingActivations,
           expiry: info.Expiry,
           lastCheckedAt: new Date().toISOString(),
+
+          maxDurationSeconds: Math.floor(info.MaxDuration / 1000),
+          vibrateIntensityLimit: info.MaxIntensity,
+          vibrateDurationLimitSeconds: Math.floor(info.MaxDuration / 1000),
+
+          shockIntensityLimit: info.MaxIntensity,
+          shockDurationLimitSeconds: Math.floor(info.MaxDuration / 1000),
         };
       })
     );
@@ -127,11 +136,18 @@ export async function POST(request: Request) {
   const id = randomBytes(8).toString("hex");
   const editToken = randomBytes(24).toString("hex");
 
+  const accessPassword = parsed.data.accessPassword?.trim();
+
+  const accessPasswordHash = accessPassword
+    ? hashAccessPassword(accessPassword)
+    : null;
+
   const { error } = await supabaseAdmin.from("bundles").insert({
     id,
     title,
     links: checkedLinks,
     edit_token: editToken,
+    access_password_hash: accessPasswordHash,
   });
 
   if (error) {

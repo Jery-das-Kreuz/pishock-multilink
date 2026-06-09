@@ -20,30 +20,80 @@ type StoredLink = {
   paused: boolean;
   remainingActivations: number;
   expiry: string | null;
+
+  vibrateIntensityLimit?: number;
+  vibrateDurationLimitSeconds?: number;
+  shockIntensityLimit?: number;
+  shockDurationLimitSeconds?: number;
+  intensityLimit?: number;
+  durationLimitSeconds?: number;
+  maxDurationSeconds?: number;
 };
 
 type Props = {
   bundleId: string;
   links: StoredLink[];
+  requiresPassword: boolean;
 };
 
 type CommandMode = "s" | "v" | "e";
 
-export function BundleControlPanel({ bundleId, links }: Props) {
+export function BundleControlPanel({ bundleId, links, requiresPassword }: Props) {
   const [username, setUsername] = useState("");
+  const [accessPassword, setAccessPassword] = useState("");
+  const [accessGranted, setAccessGranted] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [checkingAccess, setCheckingAccess] = useState(false);
   const [selectedUuids, setSelectedUuids] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [groupVibrateIntensity, setGroupVibrateIntensity] = useState(10);
-  const [groupVibrateDuration, setGroupVibrateDuration] = useState(1000);
+  const [groupVibrateDuration, setGroupVibrateDuration] = useState(1);
 
   const [groupShockIntensity, setGroupShockIntensity] = useState(5);
-  const [groupShockDuration, setGroupShockDuration] = useState(300);
+  const [groupShockDuration, setGroupShockDuration] = useState(.3);
   const [groupShockWarning, setGroupShockWarning] = useState(false);
   const [groupShockWarningLevel, setGroupShockWarningLevel] = useState(1);
 
   const [groupLoading, setGroupLoading] = useState<CommandMode | null>(null);
   const [groupMessage, setGroupMessage] = useState<string | null>(null);
+
+  async function unlockAccess() {
+    setAccessError(null);
+    setCheckingAccess(true);
+
+    try {
+      if (!username.trim()) {
+        throw new Error("Please enter a display name.");
+      }
+
+      if (requiresPassword && !accessPassword.trim()) {
+        throw new Error("Please enter the access password.");
+      }
+
+      const response = await fetch(`/api/bundles/${bundleId}/access`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          password: accessPassword,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Access denied.");
+      }
+
+      setAccessGranted(true);
+    } catch (error) {
+      setAccessError(error instanceof Error ? error.message : "Unknown error.");
+    } finally {
+      setCheckingAccess(false);
+    }
+  }
 
   const selectableLinks = useMemo(() => {
     return links.filter((link) => !link.paused && !link.forceLogin);
@@ -54,6 +104,42 @@ export function BundleControlPanel({ bundleId, links }: Props) {
   }, [links, selectedUuids]);
 
   const selectedCount = selectedLinks.length;
+
+  const selectedVibrateMaxIntensity = Math.max(
+    0,
+    ...selectedLinks.map(
+      (link) => link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity
+    )
+  );
+
+  const selectedVibrateMaxDurationSeconds = Math.max(
+    0.1,
+    ...selectedLinks.map(
+      (link) =>
+        link.vibrateDurationLimitSeconds ??
+        link.durationLimitSeconds ??
+        link.maxDurationSeconds ??
+        Math.floor(link.maxDuration / 1000)
+    )
+  );
+
+  const selectedShockMaxIntensity = Math.max(
+    0,
+    ...selectedLinks.map(
+      (link) => link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity
+    )
+  );
+
+  const selectedShockMaxDurationSeconds = Math.max(
+    0.1,
+    ...selectedLinks.map(
+      (link) =>
+        link.shockDurationLimitSeconds ??
+        link.durationLimitSeconds ??
+        link.maxDurationSeconds ??
+        Math.floor(link.maxDuration / 1000)
+    )
+  );
 
   function toggleSelected(uuid: string, selected: boolean) {
     setSelectedUuids((current) => {
@@ -114,6 +200,7 @@ export function BundleControlPanel({ bundleId, links }: Props) {
             body: JSON.stringify({
               uuid: link.uuid,
               username: username.trim(),
+              accessPassword,
               mode,
               intensity: mode === "e" ? 0 : options?.intensity ?? 0,
               duration: mode === "e" ? 0 : options?.duration ?? 0,
@@ -152,22 +239,67 @@ export function BundleControlPanel({ bundleId, links }: Props) {
 
   return (
     <>
+      {!accessGranted && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
+            <h2 className="text-2xl font-bold">Enter control page</h2>
+
+            <p className="mt-3 text-sm text-zinc-400">
+              Choose a display name for the PiShock log.
+              {requiresPassword
+                ? " This bundle also requires an access password."
+                : ""}
+            </p>
+
+            <div className="mt-5 grid gap-4">
+              <label className="grid gap-2">
+                <span className="text-sm text-zinc-300">Display name</span>
+                <input
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder="Your name"
+                  className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  autoFocus
+                />
+              </label>
+
+              {requiresPassword && (
+                <label className="grid gap-2">
+                  <span className="text-sm text-zinc-300">Access password</span>
+                  <input
+                    type="password"
+                    value={accessPassword}
+                    onChange={(event) => setAccessPassword(event.target.value)}
+                    placeholder="Password"
+                    className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
+                  />
+                </label>
+              )}
+
+              <button
+                onClick={unlockAccess}
+                disabled={checkingAccess}
+                className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {checkingAccess ? "Checking..." : "Continue"}
+              </button>
+            </div>
+
+            {accessError && (
+              <div className="mt-4 rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-100">
+                {accessError}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-        <label className="grid gap-2">
-          <span className="text-sm text-zinc-300">Dein Anzeigename</span>
-
-          <input
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            placeholder="Name für PiShock-Log"
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
-          />
-        </label>
-
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-zinc-500">
-            This name is used for all commands on this page.
-          </p>
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+          <div>
+            <div className="text-sm text-zinc-400">Display name</div>
+            <div className="mt-1 text-lg font-semibold">{username}</div>
+          </div>
 
           <label className="flex items-center gap-2 text-sm text-zinc-300">
             <input
@@ -179,6 +311,7 @@ export function BundleControlPanel({ bundleId, links }: Props) {
           </label>
         </div>
       </section>
+
       {selectedCount > 1 && (
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
@@ -220,7 +353,7 @@ export function BundleControlPanel({ bundleId, links }: Props) {
                     <input
                     type="range"
                     min={0}
-                    max={100}
+                    max={selectedVibrateMaxIntensity}
                     value={groupVibrateIntensity}
                     onChange={(event) =>
                         setGroupVibrateIntensity(Number(event.target.value))
@@ -231,14 +364,14 @@ export function BundleControlPanel({ bundleId, links }: Props) {
                 <label className="grid gap-2">
                     <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Duration</span>
-                    <span className="font-mono">{groupVibrateDuration} ms</span>
+                    <span className="font-mono">{groupVibrateDuration} s</span>
                     </div>
 
                     <input
                     type="range"
-                    min={100}
-                    max={15000}
-                    step={100}
+                    min={0.1}
+                    max={selectedVibrateMaxDurationSeconds}
+                    step={0.1}
                     value={groupVibrateDuration}
                     onChange={(event) =>
                         setGroupVibrateDuration(Number(event.target.value))
@@ -276,7 +409,7 @@ export function BundleControlPanel({ bundleId, links }: Props) {
                     <input
                     type="range"
                     min={0}
-                    max={100}
+                    max={selectedShockMaxIntensity}
                     value={groupShockIntensity}
                     onChange={(event) =>
                         setGroupShockIntensity(Number(event.target.value))
@@ -287,14 +420,14 @@ export function BundleControlPanel({ bundleId, links }: Props) {
                 <label className="grid gap-2">
                     <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Duration</span>
-                    <span className="font-mono">{groupShockDuration} ms</span>
+                    <span className="font-mono">{groupShockDuration} s</span>
                     </div>
 
                     <input
                     type="range"
-                    min={100}
-                    max={15000}
-                    step={100}
+                    min={0.1}
+                    max={selectedShockMaxDurationSeconds}
+                    step={0.1}
                     value={groupShockDuration}
                     onChange={(event) =>
                         setGroupShockDuration(Number(event.target.value))
@@ -354,7 +487,7 @@ export function BundleControlPanel({ bundleId, links }: Props) {
             disabled={!username.trim() || selectedCount === 0 || groupLoading !== null}
             className="mt-4 rounded-lg border border-zinc-700 px-5 py-3 text-sm font-semibold hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-            {groupLoading === "e" ? "Stoppe..." : "Stop selected"}
+            {groupLoading === "e" ? "Stopping..." : "Stop selected"}
             </button>
 
             {showAdvanced && groupMessage && (
@@ -373,6 +506,7 @@ export function BundleControlPanel({ bundleId, links }: Props) {
             bundleId={bundleId}
             link={link}
             username={username}
+            accessPassword={accessPassword}
             selected={selectedUuids.includes(link.uuid)}
             onSelectedChange={(selected) => toggleSelected(link.uuid, selected)}
             showAdvanced={showAdvanced}

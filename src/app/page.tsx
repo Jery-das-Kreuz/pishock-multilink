@@ -72,6 +72,7 @@ function createPiShockUrl(uuid: string): string {
 
 export default function Home() {
   const [bundleTitle, setBundleTitle] = useState("My PiShock Bundle");
+  const [accessPassword, setAccessPassword] = useState("");
   const [customName, setCustomName] = useState("");
   const [input, setInput] = useState("");
 
@@ -166,6 +167,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           title: bundleTitle,
+          accessPassword: accessPassword.trim() || undefined,
           links: links.map((link) => ({
             name: link.customName,
             uuid: link.uuid,
@@ -215,6 +217,17 @@ await navigator.clipboard.writeText(absoluteUrl);
               <input
                 value={bundleTitle}
                 onChange={(event) => setBundleTitle(event.target.value)}
+                className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
+              />
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-sm text-zinc-300">Access password optional</span>
+              <input
+                type="password"
+                value={accessPassword}
+                onChange={(event) => setAccessPassword(event.target.value)}
+                placeholder="Leave empty for name-only access"
                 className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-blue-500"
               />
             </label>

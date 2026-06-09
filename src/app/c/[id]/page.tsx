@@ -45,7 +45,7 @@ export default async function BundlePage({
 
   const { data, error } = await supabaseAdmin
     .from("bundles")
-    .select("id, title, links, created_at, expires_at, disabled")
+    .select("id, title, links, created_at, expires_at, disabled, access_password_hash")
     .eq("id", id)
     .single();
 
@@ -66,7 +66,11 @@ export default async function BundlePage({
           </p>
         </header>
 
-        <BundleControlPanel bundleId={data.id} links={links} />
+        <BundleControlPanel
+          bundleId={data.id}
+          links={links}
+          requiresPassword={Boolean(data.access_password_hash)}
+        />
       </div>
     </main>
   );

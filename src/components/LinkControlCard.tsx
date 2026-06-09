@@ -19,12 +19,21 @@ type StoredLink = {
   paused: boolean;
   remainingActivations: number;
   expiry: string | null;
+
+  vibrateIntensityLimit?: number;
+  vibrateDurationLimitSeconds?: number;
+  shockIntensityLimit?: number;
+  shockDurationLimitSeconds?: number;
+  intensityLimit?: number;
+  durationLimitSeconds?: number;
+  maxDurationSeconds?: number;
 };
 
 type Props = {
   bundleId: string;
   link: StoredLink;
   username: string;
+  accessPassword: string;
   selected: boolean;
   onSelectedChange: (selected: boolean) => void;
   showAdvanced: boolean;
@@ -36,22 +45,41 @@ export function LinkControlCard({
   bundleId,
   link,
   username,
+  accessPassword,
   selected,
   onSelectedChange,
   showAdvanced,
 }: Props) {
+  const vibrateMaxIntensity =
+    link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity;
+
+  const vibrateMaxDurationSeconds =
+    link.vibrateDurationLimitSeconds ??
+    link.durationLimitSeconds ??
+    link.maxDurationSeconds ??
+    Math.floor(link.maxDuration / 1000);
+
+  const shockMaxIntensity =
+    link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity;
+
+  const shockMaxDurationSeconds =
+    link.shockDurationLimitSeconds ??
+    link.durationLimitSeconds ??
+    link.maxDurationSeconds ??
+    Math.floor(link.maxDuration / 1000);
+
   const [vibrateIntensity, setVibrateIntensity] = useState(
-    Math.min(10, link.maxIntensity)
+    Math.min(10, vibrateMaxIntensity)
   );
   const [vibrateDuration, setVibrateDuration] = useState(
-    Math.min(1000, link.maxDuration)
+    Math.min(1, vibrateMaxDurationSeconds)
   );
 
   const [shockIntensity, setShockIntensity] = useState(
-    Math.min(5, link.maxIntensity)
+    Math.min(5, shockMaxIntensity)
   );
   const [shockDuration, setShockDuration] = useState(
-    Math.min(300, link.maxDuration)
+    Math.min(0.3, shockMaxDurationSeconds)
   );
 
   const [shockWarning, setShockWarning] = useState(false);
@@ -83,6 +111,7 @@ export function LinkControlCard({
         body: JSON.stringify({
           uuid: link.uuid,
           username: username.trim(),
+          accessPassword,
           mode,
           intensity: mode === "e" ? 0 : options?.intensity ?? 0,
           duration: mode === "e" ? 0 : options?.duration ?? 0,
@@ -174,7 +203,7 @@ export function LinkControlCard({
                 <input
                   type="range"
                   min={0}
-                  max={link.maxIntensity}
+                  max={vibrateMaxIntensity}
                   value={vibrateIntensity}
                   onChange={(event) =>
                     setVibrateIntensity(Number(event.target.value))
@@ -185,14 +214,14 @@ export function LinkControlCard({
               <label className="grid gap-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-300">Duration</span>
-                  <span className="font-mono">{vibrateDuration} ms</span>
+                  <span className="font-mono">{vibrateDuration} s</span>
                 </div>
 
                 <input
                   type="range"
-                  min={100}
-                  max={link.maxDuration}
-                  step={100}
+                  min={0.1}
+                  max={vibrateMaxDurationSeconds}
+                  step={0.1}
                   value={vibrateDuration}
                   onChange={(event) =>
                     setVibrateDuration(Number(event.target.value))
@@ -236,7 +265,7 @@ export function LinkControlCard({
                 <input
                   type="range"
                   min={0}
-                  max={link.maxIntensity}
+                  max={shockMaxIntensity}
                   value={shockIntensity}
                   onChange={(event) =>
                     setShockIntensity(Number(event.target.value))
@@ -247,14 +276,14 @@ export function LinkControlCard({
               <label className="grid gap-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-300">Duration</span>
-                  <span className="font-mono">{shockDuration} ms</span>
+                  <span className="font-mono">{shockDuration} s</span>
                 </div>
 
                 <input
                   type="range"
-                  min={100}
-                  max={link.maxDuration}
-                  step={100}
+                  min={0.1}
+                  max={shockMaxDurationSeconds}
+                  step={0.1}
                   value={shockDuration}
                   onChange={(event) =>
                     setShockDuration(Number(event.target.value))
@@ -324,10 +353,10 @@ export function LinkControlCard({
             <InfoBox label="Shock" value={link.shockEnabled ? "Allowed" : "Off"} />
             <InfoBox
               label="Vibrate"
-              value={link.vibrateEnabled ? "Erlaubt" : "Aus"}
+              value={link.vibrateEnabled ? "Allowed" : "Off"}
             />
             <InfoBox label="Max Intensity" value={link.maxIntensity} />
-            <InfoBox label="Max Duration" value={`${link.maxDuration} ms`} />
+            <InfoBox label="Max Duration" value={`${link.maxDuration} s`} />
           </div>
 
           {message && (

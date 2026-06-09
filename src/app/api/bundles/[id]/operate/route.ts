@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import WebSocket from "ws";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { verifyAccessPassword } from "@/lib/accessPassword";
 
 type StoredLink = {
   name: string;
@@ -20,6 +21,17 @@ type StoredLink = {
 
   maxIntensity: number;
   maxDuration: number;
+  maxDurationSeconds?: number;
+
+  vibrateIntensityLimit?: number;
+  vibrateDurationLimitSeconds?: number;
+
+  shockIntensityLimit?: number;
+  shockDurationLimitSeconds?: number;
+
+  // Legacy fallback fields for old bundles.
+  intensityLimit?: number;
+  durationLimitSeconds?: number;
 
   forceLogin: boolean;
   forceWarning: boolean;
@@ -31,29 +43,63 @@ type StoredLink = {
   lastCheckedAt: string;
 };
 
+const numberFromJson = z.preprocess((value) => {
+  if (typeof value === "string" && value.trim() !== "") {
+    return Number(value);
+  }
+
+  return value;
+}, z.number());
+
 const operateSchema = z.object({
   uuid: z.string().uuid(),
   username: z.string().trim().min(1).max(32),
+  accessPassword: z.string().optional().default(""),
 
   mode: z.enum(["s", "v", "e"]),
 
-  intensity: z.number().int().min(0).max(100),
-  duration: z.number().int().min(0).max(30000),
+  intensity: numberFromJson.optional().default(0),
 
-  warning: z.boolean().default(false),
-  warningLevel: z.number().int().min(0).max(3).default(0),
+  // New field: seconds.
+  durationSeconds: numberFromJson.optional(),
 
-  hold: z.boolean().default(false),
+  // Legacy field: sometimes milliseconds, sometimes seconds depending on old UI.
+  duration: numberFromJson.optional(),
+
+  warning: z.boolean().optional().default(false),
+  warningLevel: numberFromJson.optional().default(0),
+
+  hold: z.boolean().optional().default(false),
 });
 
 function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max));
+  const safeValue = Number.isFinite(value) ? value : min;
+  return Math.max(min, Math.min(safeValue, max));
 }
 
-function publishToPiShock(
-  uuid: string,
-  payload: unknown
-): Promise<unknown> {
+function getRequestedDurationSeconds(command: {
+  durationSeconds?: number;
+  duration?: number;
+}): number {
+  if (typeof command.durationSeconds === "number") {
+    return command.durationSeconds;
+  }
+
+  if (typeof command.duration === "number") {
+    // Legacy compatibility:
+    // values above 60 are almost certainly milliseconds from the old UI.
+    if (command.duration > 60) {
+      return command.duration / 1000;
+    }
+
+    // Small values are treated as seconds.
+    return command.duration;
+  }
+
+  return 0;
+}
+
+function publishToPiShock(uuid: string, payload: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`wss://broker.pishock.com/Links/${uuid}`);
 
@@ -102,6 +148,11 @@ export async function POST(
   const parsed = operateSchema.safeParse(body);
 
   if (!parsed.success) {
+    console.error("Operate validation error:", {
+      body,
+      details: parsed.error.flatten(),
+    });
+
     return NextResponse.json(
       {
         error: "Invalid operate request.",
@@ -115,7 +166,7 @@ export async function POST(
 
   const { data: bundle, error } = await supabaseAdmin
     .from("bundles")
-    .select("id, title, links, disabled")
+    .select("id, title, links, disabled, access_password_hash")
     .eq("id", id)
     .single();
 
@@ -125,12 +176,23 @@ export async function POST(
 
   if (bundle.disabled) {
     return NextResponse.json(
-      { error: "Bundle is disabled." },
+      { error: "Bundle is offline." },
       { status: 410 }
     );
   }
 
+  if (
+    bundle.access_password_hash &&
+    !verifyAccessPassword(command.accessPassword, bundle.access_password_hash)
+  ) {
+    return NextResponse.json(
+      { error: "Invalid access password." },
+      { status: 403 }
+    );
+  }
+
   const links = bundle.links as StoredLink[];
+
   const link = links.find(
     (item) => item.uuid.toLowerCase() === command.uuid.toLowerCase()
   );
@@ -167,6 +229,41 @@ export async function POST(
     );
   }
 
+  const maxDurationSeconds =
+    link.maxDurationSeconds ?? Math.max(0.1, Math.floor(link.maxDuration / 1000));
+
+  const effectiveMaxIntensity =
+    command.mode === "s"
+      ? Math.min(
+          link.maxIntensity,
+          link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity
+        )
+      : command.mode === "v"
+        ? Math.min(
+            link.maxIntensity,
+            link.vibrateIntensityLimit ??
+              link.intensityLimit ??
+              link.maxIntensity
+          )
+        : 0;
+
+  const effectiveMaxDurationSeconds =
+    command.mode === "s"
+      ? Math.min(
+          maxDurationSeconds,
+          link.shockDurationLimitSeconds ??
+            link.durationLimitSeconds ??
+            maxDurationSeconds
+        )
+      : command.mode === "v"
+        ? Math.min(
+            maxDurationSeconds,
+            link.vibrateDurationLimitSeconds ??
+              link.durationLimitSeconds ??
+              maxDurationSeconds
+          )
+        : 0;
+
   const safeUsername = command.username
     .replace(/[^\w .-]/g, "")
     .slice(0, 32);
@@ -174,15 +271,19 @@ export async function POST(
   const safeIntensity =
     command.mode === "e"
       ? 0
-      : clamp(command.intensity, 0, link.maxIntensity);
+      : clamp(Math.round(command.intensity), 0, effectiveMaxIntensity);
 
-  const safeDuration =
+  const requestedDurationSeconds = getRequestedDurationSeconds(command);
+
+  const safeDurationSeconds =
     command.mode === "e"
       ? 0
-      : clamp(command.duration, 0, link.maxDuration);
+      : clamp(requestedDurationSeconds, 0, effectiveMaxDurationSeconds);
+
+  const safeDurationMs = Math.round(safeDurationSeconds * 1000);
 
   const safeWarningLevel = command.warning
-    ? clamp(command.warningLevel, 1, 3)
+    ? clamp(Math.round(command.warningLevel), 1, 3)
     : 0;
 
   const payload = {
@@ -190,7 +291,7 @@ export async function POST(
     LinkCommand: {
       Mode: command.mode,
       Intensity: safeIntensity,
-      Duration: safeDuration,
+      Duration: safeDurationMs,
       Replace: true,
       LogData: {
         Warning: command.warning,
