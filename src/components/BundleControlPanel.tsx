@@ -71,9 +71,9 @@ export function BundleControlPanel({
   useEffect(() => {
     const cleanTitle = bundleTitle.trim();
 
-    if (cleanTitle) {
-      document.title = cleanTitle;
-    }
+    document.title = cleanTitle
+      ? `${cleanTitle} Control | PiShock Bundle Links`
+      : "PiShock Bundle Control | PiShock Bundle Links";
   }, [bundleTitle]);
 
   useEffect(() => {
@@ -153,7 +153,7 @@ export function BundleControlPanel({
   }
 
   const selectableLinks = useMemo(() => {
-    return links.filter((link) => !link.paused && !link.forceLogin);
+    return links.filter((link) => !link.paused);
   }, [links]);
 
   const selectedLinks = useMemo(() => {

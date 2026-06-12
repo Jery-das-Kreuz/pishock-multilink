@@ -208,12 +208,6 @@ export async function POST(
     return NextResponse.json({ error: "This link is paused." }, { status: 403 });
   }
 
-  if (link.forceLogin) {
-    return NextResponse.json(
-      { error: "This link requires login and cannot be used here." },
-      { status: 403 }
-    );
-  }
 
   if (command.mode === "s" && !link.shockEnabled) {
     return NextResponse.json(

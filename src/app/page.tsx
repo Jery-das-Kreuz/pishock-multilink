@@ -1,6 +1,12 @@
 "use client";
 
+import Image, { type StaticImageData } from "next/image";
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
+
+import shareTutorial1 from "./sharetutorial1.png";
+import shareTutorial2 from "./sharetutorial2.png";
+import shareTutorial3 from "./sharetutorial3.png";
 
 type PiShockLinkInfo = {
   LinkId: number;
@@ -84,6 +90,7 @@ export default function Home() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
 
   const [manageUrl, setManageUrl] = useState<string | null>(null);
+  const [linkHelpOpen, setLinkHelpOpen] = useState(false);
 
   const bundleJson = useMemo(() => {
     return {
@@ -187,8 +194,6 @@ export default function Home() {
       setShareUrl(absoluteUrl);
       setManageUrl(absoluteManageUrl);
 
-await navigator.clipboard.writeText(absoluteUrl);
-
       await navigator.clipboard.writeText(absoluteUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error.");
@@ -209,7 +214,23 @@ await navigator.clipboard.writeText(absoluteUrl);
         </header>
 
         <section className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
-          <h2 className="text-xl font-semibold">Create bundle</h2>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">Create bundle</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Paste PiShock LinkControl links here and give each shocker a
+                bundle display name.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setLinkHelpOpen(true)}
+              className="rounded-lg border border-blue-500/60 px-4 py-2 text-left text-sm font-semibold text-blue-200 hover:bg-blue-950 sm:text-center"
+            >
+              How to create PiShock links
+            </button>
+          </div>
 
           <div className="mt-5 grid gap-4">
             <label className="grid gap-2">
@@ -336,7 +357,152 @@ await navigator.clipboard.writeText(absoluteUrl);
           )}
         </section>
       </div>
+
+      {linkHelpOpen && (
+        <LinkCreationHelpModal onClose={() => setLinkHelpOpen(false)} />
+      )}
     </main>
+  );
+}
+
+function LinkCreationHelpModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/80 px-4 py-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="link-help-title"
+      onClick={onClose}
+    >
+      <div
+        className="mx-auto max-w-5xl rounded-2xl border border-zinc-700 bg-zinc-950 p-6 text-zinc-100 shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 id="link-help-title" className="text-2xl font-bold">
+              How to get a PiShock LinkControl link
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-zinc-400">
+              Create one public LinkControl link per shocker on pishock.com,
+              then paste each link into this bundle builder.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold hover:bg-zinc-900"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-5 lg:grid-cols-3">
+          <TutorialStep
+            number="1"
+            title="Open the share menu"
+            imageSrc={shareTutorial1}
+            imageAlt="PiShock control page with the Share button circled"
+          >
+            Open the shocker you want to add and press <strong>Share</strong>.
+          </TutorialStep>
+
+          <TutorialStep
+            number="2"
+            title="Create a link"
+            imageSrc={shareTutorial2}
+            imageAlt="PiShock share popup with the Link button circled"
+          >
+            In the share popup, choose <strong>+ Link</strong>. Do not use the
+            one-time code option for this bundle builder.
+          </TutorialStep>
+
+          <TutorialStep
+            number="3"
+            title="Use the required settings"
+            imageSrc={shareTutorial3}
+            imageAlt="PiShock LinkControl creation settings with Force Warning and Force Login disabled"
+          >
+            Disable <strong>Force Warning</strong> and <strong>Force Login</strong>
+            as shown here. Disabling <strong>Force Login</strong> is essential,
+            because bundled web controls and OVR access cannot reliably operate
+            a link that requires an interactive PiShock login.
+          </TutorialStep>
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-blue-900 bg-blue-950/40 p-4">
+            <h3 className="font-semibold text-blue-100">
+              What to configure on PiShock
+            </h3>
+            <p className="mt-2 text-sm text-blue-100/90">
+              The PiShock link settings are the hard permission ceiling. The
+              bundle cannot exceed the modes, max intensity, or max duration you
+              allow while creating the PiShock link. Turn off Force Warning and
+              Force Login when creating the link. Force Login must be disabled
+              so the bundle control page and OVR command route can use the link
+              without a manual PiShock login step.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+            <h3 className="font-semibold">What can be changed later</h3>
+            <p className="mt-2 text-sm text-zinc-300">
+              The name you enter on the PiShock link creation screen does not
+              matter for this website. Set the display name on the bundle
+              creation page, and adjust it later on the private management page.
+              Everything else can be limited through this web interface on the
+              private management page, including shock and vibrate intensity and
+              duration per shocker.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-xl border border-yellow-900 bg-yellow-950/40 p-4 text-sm text-yellow-100">
+          <strong>Important:</strong> Force Login must be disabled before you
+          press <strong>Create Link</strong>. Then copy the generated LinkControl
+          URL and paste it into the <strong>PiShock link</strong> field on this
+          page.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TutorialStep({
+  number,
+  title,
+  imageSrc,
+  imageAlt,
+  children,
+}: {
+  number: string;
+  title: string;
+  imageSrc: StaticImageData;
+  imageAlt: string;
+  children: ReactNode;
+}) {
+  return (
+    <article className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <div className="flex items-center gap-3">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold">
+          {number}
+        </span>
+        <h3 className="font-semibold">{title}</h3>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-lg border border-zinc-800 bg-black">
+        <Image
+          src={imageSrc}
+          alt={imageAlt}
+          className="h-auto w-full"
+          sizes="(min-width: 1024px) 33vw, 100vw"
+        />
+      </div>
+
+      <p className="mt-3 text-sm text-zinc-300">{children}</p>
+    </article>
   );
 }
 
@@ -347,7 +513,7 @@ function LinkCard({
   link: BundleLink;
   onRemove: () => void;
 }) {
-  const disabled = link.data.Paused || link.data.ForceLogin;
+  const disabled = link.data.Paused;
 
   return (
     <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
@@ -397,9 +563,8 @@ function LinkCard({
 
       {disabled && (
         <div className="mt-4 rounded-lg border border-yellow-800 bg-yellow-950 px-4 py-3 text-sm text-yellow-100">
-          This link may be problematic for no-login use: {" "}
-          {link.data.Paused && "The link is paused. "}
-          {link.data.ForceLogin && "Force login is enabled. "}
+          This link is paused and cannot be controlled until it is unpaused on
+          PiShock.
         </div>
       )}
 

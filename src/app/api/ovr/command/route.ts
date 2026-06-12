@@ -127,7 +127,7 @@ function effectiveMaxDurationSeconds(link: StoredLink, mode: "s" | "v" | "e") {
 }
 
 function allowedForMode(link: StoredLink, mode: "s" | "v" | "e") {
-  if (link.paused || link.forceLogin) return false;
+  if (link.paused) return false;
   if (mode === "s") return link.shockEnabled;
   if (mode === "v") return link.vibrateEnabled;
   return true;

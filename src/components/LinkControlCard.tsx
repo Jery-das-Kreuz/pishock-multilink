@@ -94,7 +94,7 @@ export function LinkControlCard({
   const [message, setMessage] = useState<string | null>(null);
   const [loadingMode, setLoadingMode] = useState<CommandMode | null>(null);
 
-  const baseDisabled = link.paused || link.forceLogin || !username.trim();
+  const baseDisabled = link.paused || !username.trim();
 
   async function sendCommand(
     mode: CommandMode,
@@ -152,7 +152,7 @@ export function LinkControlCard({
               <input
                 type="checkbox"
                 checked={selected}
-                disabled={link.paused || link.forceLogin}
+                disabled={link.paused}
                 onChange={(event) => onSelectedChange(event.target.checked)}
               />
               <span>Select</span>

@@ -267,6 +267,14 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
   }, [bundleId]);
 
   useEffect(() => {
+    const cleanTitle = title.trim();
+
+    document.title = cleanTitle
+      ? `${cleanTitle} Management | PiShock Bundle Links`
+      : "Manage PiShock Bundle | PiShock Bundle Links";
+  }, [title]);
+
+  useEffect(() => {
     async function loadBundle() {
       setLoading(true);
       setError(null);

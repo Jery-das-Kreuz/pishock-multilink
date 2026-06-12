@@ -49,7 +49,7 @@ export async function generateMetadata({
   const title = String(data?.title ?? "PiShock Bundle").trim() || "PiShock Bundle";
 
   return {
-    title,
+    title: `${title} Control`,
   };
 }
 
