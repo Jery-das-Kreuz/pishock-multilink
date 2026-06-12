@@ -40,12 +40,6 @@ type Props = {
 
 type CommandMode = "s" | "v" | "e";
 
-function randomIntensity(maxIntensity: number) {
-  const safeMax = Math.max(0, Math.floor(maxIntensity));
-
-  return Math.floor(Math.random() * (safeMax + 1));
-}
-
 export function BundleControlPanel({
   bundleId,
   initialTitle,
@@ -409,23 +403,10 @@ export function BundleControlPanel({
                 <h3 className="font-semibold">Vibrate selected</h3>
 
                 <div className="mt-4 grid gap-4">
-                <div className="grid gap-2">
-                    <div className="flex items-center justify-between gap-3 text-sm">
+                <label className="grid gap-2">
+                    <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Intensity</span>
-                    <div className="flex items-center gap-2">
-                        <span className="font-mono">{groupVibrateIntensity}</span>
-                        <button
-                        type="button"
-                        onClick={() =>
-                            setGroupVibrateIntensity(
-                            randomIntensity(selectedVibrateMaxIntensity)
-                            )
-                        }
-                        className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
-                        >
-                        Randomise
-                        </button>
-                    </div>
+                    <span className="font-mono">{groupVibrateIntensity}</span>
                     </div>
 
                     <input
@@ -436,9 +417,8 @@ export function BundleControlPanel({
                     onChange={(event) =>
                         setGroupVibrateIntensity(Number(event.target.value))
                     }
-                    aria-label="Selected vibrate intensity"
                     />
-                </div>
+                </label>
 
                 <label className="grid gap-2">
                     <div className="flex justify-between text-sm">
@@ -479,23 +459,10 @@ export function BundleControlPanel({
                 <h3 className="font-semibold text-red-200">Shock selected</h3>
 
                 <div className="mt-4 grid gap-4">
-                <div className="grid gap-2">
-                    <div className="flex items-center justify-between gap-3 text-sm">
+                <label className="grid gap-2">
+                    <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Intensity</span>
-                    <div className="flex items-center gap-2">
-                        <span className="font-mono">{groupShockIntensity}</span>
-                        <button
-                        type="button"
-                        onClick={() =>
-                            setGroupShockIntensity(
-                            randomIntensity(selectedShockMaxIntensity)
-                            )
-                        }
-                        className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
-                        >
-                        Randomise
-                        </button>
-                    </div>
+                    <span className="font-mono">{groupShockIntensity}</span>
                     </div>
 
                     <input
@@ -506,9 +473,8 @@ export function BundleControlPanel({
                     onChange={(event) =>
                         setGroupShockIntensity(Number(event.target.value))
                     }
-                    aria-label="Selected shock intensity"
                     />
-                </div>
+                </label>
 
                 <label className="grid gap-2">
                     <div className="flex justify-between text-sm">
@@ -623,17 +589,17 @@ function DisabledBundleDialog({ title }: { title: string }) {
         </div>
 
         <h2 id="bundle-disabled-title" className="mt-4 text-2xl font-bold">
-          Seite momentan deaktiviert
+          Page currently disabled
         </h2>
 
         <p className="mt-3 text-sm text-zinc-300">
-          {title.trim() || "Dieses Bundle"} ist aktuell nicht freigegeben. Die
-          Steuerung bleibt blockiert, bis der Link wieder aktiviert wird.
+          {title.trim() || "This bundle"} is currently not available. Controls remain
+          blocked until the link is activated again.
         </p>
 
         <p className="mt-4 text-xs text-zinc-500">
-          Dieses Fenster schließt sich automatisch, sobald die Seite wieder
-          freigegeben ist.
+          This window will close automatically as soon as the page is available
+          again.
         </p>
       </div>
     </div>
