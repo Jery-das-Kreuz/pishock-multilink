@@ -225,9 +225,13 @@ export async function POST(request: Request) {
     })
   );
 
-  const sent = results
-    .filter((result): result is PromiseFulfilledResult<unknown> => result.status === "fulfilled")
-    .map((result) => result.value);
+  function isFulfilled<T>(
+    result: PromiseSettledResult<T>,
+  ): result is PromiseFulfilledResult<T> {
+    return result.status === "fulfilled";
+  }
+
+  const sent = results.filter(isFulfilled).map((result) => result.value);
 
   const failed = results
     .filter((result): result is PromiseRejectedResult => result.status === "rejected")
