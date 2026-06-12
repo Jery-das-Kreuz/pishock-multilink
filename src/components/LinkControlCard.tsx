@@ -41,6 +41,12 @@ type Props = {
 
 type CommandMode = "s" | "v" | "e";
 
+function randomIntensity(maxIntensity: number) {
+  const safeMax = Math.max(0, Math.floor(maxIntensity));
+
+  return Math.floor(Math.random() * (safeMax + 1));
+}
+
 export function LinkControlCard({
   bundleId,
   link,
@@ -194,10 +200,21 @@ export function LinkControlCard({
             </p>
           ) : (
             <div className="mt-4 grid gap-4">
-              <label className="grid gap-2">
-                <div className="flex justify-between text-sm">
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="text-zinc-300">Intensity</span>
-                  <span className="font-mono">{vibrateIntensity}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono">{vibrateIntensity}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setVibrateIntensity(randomIntensity(vibrateMaxIntensity))
+                      }
+                      className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+                    >
+                      Randomise
+                    </button>
+                  </div>
                 </div>
 
                 <input
@@ -208,8 +225,9 @@ export function LinkControlCard({
                   onChange={(event) =>
                     setVibrateIntensity(Number(event.target.value))
                   }
+                  aria-label="Vibrate intensity"
                 />
-              </label>
+              </div>
 
               <label className="grid gap-2">
                 <div className="flex justify-between text-sm">
@@ -256,10 +274,21 @@ export function LinkControlCard({
             </p>
           ) : (
             <div className="mt-4 grid gap-4">
-              <label className="grid gap-2">
-                <div className="flex justify-between text-sm">
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="text-zinc-300">Intensity</span>
-                  <span className="font-mono">{shockIntensity}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono">{shockIntensity}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShockIntensity(randomIntensity(shockMaxIntensity))
+                      }
+                      className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+                    >
+                      Randomise
+                    </button>
+                  </div>
                 </div>
 
                 <input
@@ -270,8 +299,9 @@ export function LinkControlCard({
                   onChange={(event) =>
                     setShockIntensity(Number(event.target.value))
                   }
+                  aria-label="Shock intensity"
                 />
-              </label>
+              </div>
 
               <label className="grid gap-2">
                 <div className="flex justify-between text-sm">
@@ -303,7 +333,7 @@ export function LinkControlCard({
 
                 {shockWarning && (
                   <label className="mt-3 grid gap-2 text-sm">
-                    <span className="text-zinc-300">Warning Level</span>
+                    <span className="text-zinc-300">Warning Duration</span>
 
                     <select
                       value={shockWarningLevel}
@@ -312,9 +342,9 @@ export function LinkControlCard({
                       }
                       className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 outline-none focus:border-blue-500"
                     >
-                      <option value={1}>Level 1</option>
-                      <option value={2}>Level 2</option>
-                      <option value={3}>Level 3</option>
+                      <option value={1}>Short</option>
+                      <option value={2}>Medium</option>
+                      <option value={3}>Long</option>
                     </select>
                   </label>
                 )}

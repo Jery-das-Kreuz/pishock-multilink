@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LinkControlCard } from "@/components/LinkControlCard";
 
 type StoredLink = {
@@ -32,13 +32,29 @@ type StoredLink = {
 
 type Props = {
   bundleId: string;
+  initialTitle: string;
   links: StoredLink[];
   requiresPassword: boolean;
+  initialDisabled: boolean;
 };
 
 type CommandMode = "s" | "v" | "e";
 
-export function BundleControlPanel({ bundleId, links, requiresPassword }: Props) {
+function randomIntensity(maxIntensity: number) {
+  const safeMax = Math.max(0, Math.floor(maxIntensity));
+
+  return Math.floor(Math.random() * (safeMax + 1));
+}
+
+export function BundleControlPanel({
+  bundleId,
+  initialTitle,
+  links,
+  requiresPassword,
+  initialDisabled,
+}: Props) {
+  const [bundleTitle, setBundleTitle] = useState(initialTitle);
+  const [bundleDisabled, setBundleDisabled] = useState(initialDisabled);
   const [username, setUsername] = useState("");
   const [accessPassword, setAccessPassword] = useState("");
   const [accessGranted, setAccessGranted] = useState(false);
@@ -57,6 +73,53 @@ export function BundleControlPanel({ bundleId, links, requiresPassword }: Props)
 
   const [groupLoading, setGroupLoading] = useState<CommandMode | null>(null);
   const [groupMessage, setGroupMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    const cleanTitle = bundleTitle.trim();
+
+    if (cleanTitle) {
+      document.title = cleanTitle;
+    }
+  }, [bundleTitle]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function refreshBundleStatus() {
+      try {
+        const response = await fetch(`/api/bundles/${bundleId}`, {
+          cache: "no-store",
+        });
+
+        if (!active) return;
+
+        if (!response.ok) {
+          setBundleDisabled(true);
+          return;
+        }
+
+        const result = await response.json();
+
+        if (typeof result.title === "string" && result.title.trim()) {
+          setBundleTitle(result.title);
+        }
+
+        setBundleDisabled(Boolean(result.disabled));
+      } catch {
+        if (active) {
+          setBundleDisabled(true);
+        }
+      }
+    }
+
+    refreshBundleStatus();
+    const intervalId = window.setInterval(refreshBundleStatus, 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [bundleId]);
 
   async function unlockAccess() {
     setAccessError(null);
@@ -239,7 +302,9 @@ export function BundleControlPanel({ bundleId, links, requiresPassword }: Props)
 
   return (
     <>
-      {!accessGranted && (
+      {bundleDisabled && <DisabledBundleDialog title={bundleTitle} />}
+
+      {!bundleDisabled && !accessGranted && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
           <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl">
             <h2 className="text-2xl font-bold">Enter control page</h2>
@@ -344,10 +409,23 @@ export function BundleControlPanel({ bundleId, links, requiresPassword }: Props)
                 <h3 className="font-semibold">Vibrate selected</h3>
 
                 <div className="mt-4 grid gap-4">
-                <label className="grid gap-2">
-                    <div className="flex justify-between text-sm">
+                <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="text-zinc-300">Intensity</span>
-                    <span className="font-mono">{groupVibrateIntensity}</span>
+                    <div className="flex items-center gap-2">
+                        <span className="font-mono">{groupVibrateIntensity}</span>
+                        <button
+                        type="button"
+                        onClick={() =>
+                            setGroupVibrateIntensity(
+                            randomIntensity(selectedVibrateMaxIntensity)
+                            )
+                        }
+                        className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+                        >
+                        Randomise
+                        </button>
+                    </div>
                     </div>
 
                     <input
@@ -358,8 +436,9 @@ export function BundleControlPanel({ bundleId, links, requiresPassword }: Props)
                     onChange={(event) =>
                         setGroupVibrateIntensity(Number(event.target.value))
                     }
+                    aria-label="Selected vibrate intensity"
                     />
-                </label>
+                </div>
 
                 <label className="grid gap-2">
                     <div className="flex justify-between text-sm">
@@ -400,10 +479,23 @@ export function BundleControlPanel({ bundleId, links, requiresPassword }: Props)
                 <h3 className="font-semibold text-red-200">Shock selected</h3>
 
                 <div className="mt-4 grid gap-4">
-                <label className="grid gap-2">
-                    <div className="flex justify-between text-sm">
+                <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3 text-sm">
                     <span className="text-zinc-300">Intensity</span>
-                    <span className="font-mono">{groupShockIntensity}</span>
+                    <div className="flex items-center gap-2">
+                        <span className="font-mono">{groupShockIntensity}</span>
+                        <button
+                        type="button"
+                        onClick={() =>
+                            setGroupShockIntensity(
+                            randomIntensity(selectedShockMaxIntensity)
+                            )
+                        }
+                        className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+                        >
+                        Randomise
+                        </button>
+                    </div>
                     </div>
 
                     <input
@@ -414,8 +506,9 @@ export function BundleControlPanel({ bundleId, links, requiresPassword }: Props)
                     onChange={(event) =>
                         setGroupShockIntensity(Number(event.target.value))
                     }
+                    aria-label="Selected shock intensity"
                     />
-                </label>
+                </div>
 
                 <label className="grid gap-2">
                     <div className="flex justify-between text-sm">
@@ -514,5 +607,35 @@ export function BundleControlPanel({ bundleId, links, requiresPassword }: Props)
         ))}
       </section>
     </>
+  );
+}
+function DisabledBundleDialog({ title }: { title: string }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="bundle-disabled-title"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 px-4"
+    >
+      <div className="w-full max-w-md rounded-2xl border border-red-900 bg-zinc-900 p-6 text-center shadow-2xl">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-red-800 bg-red-950 text-xl">
+          !
+        </div>
+
+        <h2 id="bundle-disabled-title" className="mt-4 text-2xl font-bold">
+          Seite momentan deaktiviert
+        </h2>
+
+        <p className="mt-3 text-sm text-zinc-300">
+          {title.trim() || "Dieses Bundle"} ist aktuell nicht freigegeben. Die
+          Steuerung bleibt blockiert, bis der Link wieder aktiviert wird.
+        </p>
+
+        <p className="mt-4 text-xs text-zinc-500">
+          Dieses Fenster schließt sich automatisch, sobald die Seite wieder
+          freigegeben ist.
+        </p>
+      </div>
+    </div>
   );
 }

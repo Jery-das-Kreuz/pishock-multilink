@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { BundleControlPanel } from "@/components/BundleControlPanel";
+
+export const dynamic = "force-dynamic";
 
 type StoredLink = {
   name: string;
@@ -28,19 +31,29 @@ type StoredLink = {
   lastCheckedAt: string;
 };
 
-function formatDuration(ms: number): string {
-  if (ms >= 1000) {
-    return `${Math.round(ms / 1000)}s`;
-  }
+type PageProps = {
+  params: Promise<{ id: string }>;
+};
 
-  return `${ms}ms`;
+export async function generateMetadata({
+  params,
+}: PageProps): Promise<Metadata> {
+  const { id } = await params;
+
+  const { data } = await supabaseAdmin
+    .from("bundles")
+    .select("title")
+    .eq("id", id)
+    .single();
+
+  const title = String(data?.title ?? "PiShock Bundle").trim() || "PiShock Bundle";
+
+  return {
+    title,
+  };
 }
 
-export default async function BundlePage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function BundlePage({ params }: PageProps) {
   const { id } = await params;
 
   const { data, error } = await supabaseAdmin
@@ -49,7 +62,7 @@ export default async function BundlePage({
     .eq("id", id)
     .single();
 
-  if (error || !data || data.disabled) {
+  if (error || !data) {
     notFound();
   }
 
@@ -68,50 +81,12 @@ export default async function BundlePage({
 
         <BundleControlPanel
           bundleId={data.id}
+          initialTitle={data.title}
           links={links}
           requiresPassword={Boolean(data.access_password_hash)}
+          initialDisabled={Boolean(data.disabled)}
         />
       </div>
     </main>
-  );
-}
-
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
-        {label}
-      </div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
-    </div>
-  );
-}
-
-function Badge({
-  children,
-  variant,
-}: {
-  children: string;
-  variant: "success" | "warning" | "danger";
-}) {
-  const className =
-    variant === "success"
-      ? "border-green-800 bg-green-950 text-green-200"
-      : variant === "warning"
-        ? "border-yellow-800 bg-yellow-950 text-yellow-200"
-        : "border-red-800 bg-red-950 text-red-200";
-
-  return (
-    <span
-      className={`rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
-    >
-      {children}
-    </span>
   );
 }

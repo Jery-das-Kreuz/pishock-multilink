@@ -9,7 +9,7 @@ export async function GET(
 
   const { data, error } = await supabaseAdmin
     .from("bundles")
-    .select("id, title, links, created_at, expires_at, disabled")
+    .select("id, title, links, created_at, expires_at, disabled, access_password_hash")
     .eq("id", id)
     .single();
 
@@ -17,12 +17,10 @@ export async function GET(
     return NextResponse.json({ error: "Bundle not found." }, { status: 404 });
   }
 
-  if (data.disabled) {
-    return NextResponse.json(
-      { error: "Bundle is disabled." },
-      { status: 410 }
-    );
-  }
+  const { access_password_hash: accessPasswordHash, ...publicBundle } = data;
 
-  return NextResponse.json(data);
+  return NextResponse.json({
+    ...publicBundle,
+    hasAccessPassword: Boolean(accessPasswordHash),
+  });
 }
