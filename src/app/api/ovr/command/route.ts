@@ -29,6 +29,9 @@ type StoredLink = {
   durationLimitSeconds?: number;
 
   forceLogin: boolean;
+  forceWarning?: boolean;
+  forceWarningLevel?: number;
+  disabled?: boolean;
   paused: boolean;
 };
 
@@ -127,7 +130,7 @@ function effectiveMaxDurationSeconds(link: StoredLink, mode: "s" | "v" | "e") {
 }
 
 function allowedForMode(link: StoredLink, mode: "s" | "v" | "e") {
-  if (link.paused) return false;
+  if (link.paused || link.disabled) return false;
   if (mode === "s") return link.shockEnabled;
   if (mode === "v") return link.vibrateEnabled;
   return true;
@@ -194,8 +197,14 @@ export async function POST(request: Request) {
         ? 0
         : clamp(command.durationSeconds, 0, effectiveMaxDurationSeconds(link, command.mode));
 
-      const safeWarningLevel = command.warning
-        ? clamp(Math.round(command.warningLevel), 1, 3)
+      const warningForced = command.mode === "s" && Boolean(link.forceWarning);
+      const effectiveWarning = command.mode === "s" && (warningForced || command.warning);
+      const safeWarningLevel = effectiveWarning
+        ? clamp(
+            Math.round(warningForced ? link.forceWarningLevel ?? 1 : command.warningLevel),
+            1,
+            3
+          )
         : 0;
 
       const payload = {
@@ -206,7 +215,7 @@ export async function POST(request: Request) {
           Duration: Math.round(safeDurationSeconds * 1000),
           Replace: true,
           LogData: {
-            Warning: command.warning,
+            Warning: effectiveWarning,
             Username: safeUsername,
             WarningLevel: safeWarningLevel,
             Hold: false,

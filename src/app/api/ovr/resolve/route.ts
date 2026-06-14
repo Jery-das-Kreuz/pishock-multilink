@@ -28,6 +28,9 @@ type StoredLink = {
   durationLimitSeconds?: number;
 
   forceLogin: boolean;
+  forceWarning?: boolean;
+  forceWarningLevel?: number;
+  disabled?: boolean;
   paused: boolean;
 };
 
@@ -73,7 +76,10 @@ function publicLink(link: StoredLink) {
     pishockName: link.pishockName,
     uuid: link.uuid,
     paused: Boolean(link.paused),
+    disabled: Boolean(link.disabled),
     forceLogin: Boolean(link.forceLogin),
+    forceWarning: Boolean(link.forceWarning),
+    forceWarningLevel: Math.max(1, Math.min(3, Math.round(link.forceWarningLevel ?? 1))),
     shockEnabled: Boolean(link.shockEnabled),
     vibrateEnabled: Boolean(link.vibrateEnabled),
     shockMaxIntensity: Math.min(

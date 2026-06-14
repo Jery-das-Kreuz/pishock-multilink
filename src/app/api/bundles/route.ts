@@ -104,7 +104,9 @@ export async function POST(request: Request) {
           maxDuration: info.MaxDuration,
 
           forceLogin: info.ForceLogin,
-          forceWarning: info.ForceWarning,
+          forceWarning: Boolean(info.ForceWarning),
+          forceWarningLevel: 1,
+          disabled: false,
           paused: info.Paused,
           activateOnLoad: info.ActivateOnLoad,
 

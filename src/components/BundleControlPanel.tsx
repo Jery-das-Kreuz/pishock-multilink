@@ -17,6 +17,9 @@ type StoredLink = {
   maxDuration: number;
 
   forceLogin: boolean;
+  forceWarning?: boolean;
+  forceWarningLevel?: number;
+  disabled?: boolean;
   paused: boolean;
   remainingActivations: number;
   expiry: string | null;
@@ -40,14 +43,48 @@ type Props = {
 
 type CommandMode = "s" | "v" | "e";
 
+type ControllerPolicy = {
+  blocked: boolean;
+  shockCooldownSeconds: number;
+  remainingShockCooldownSeconds: number;
+  lastShockAt: string | null;
+};
+
+function normalizeWarningLevel(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.min(3, Math.round(parsed)));
+}
+
+function createLocalSessionId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getShockCooldownRemaining(policy: ControllerPolicy | null): number {
+  if (!policy || policy.shockCooldownSeconds <= 0 || !policy.lastShockAt) {
+    return 0;
+  }
+
+  const lastShockAt = new Date(policy.lastShockAt).getTime();
+  if (!Number.isFinite(lastShockAt)) return 0;
+
+  const elapsedSeconds = (Date.now() - lastShockAt) / 1000;
+  return Math.max(0, Math.ceil(policy.shockCooldownSeconds - elapsedSeconds));
+}
+
 export function BundleControlPanel({
   bundleId,
   initialTitle,
-  links,
+  links: initialLinks,
   requiresPassword,
   initialDisabled,
 }: Props) {
   const [bundleTitle, setBundleTitle] = useState(initialTitle);
+  const [links, setLinks] = useState<StoredLink[]>(initialLinks);
   const [bundleDisabled, setBundleDisabled] = useState(initialDisabled);
   const [username, setUsername] = useState("");
   const [accessPassword, setAccessPassword] = useState("");
@@ -56,12 +93,19 @@ export function BundleControlPanel({
   const [checkingAccess, setCheckingAccess] = useState(false);
   const [selectedUuids, setSelectedUuids] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [sessionId, setSessionId] = useState("");
+  const [controllerPolicy, setControllerPolicy] =
+    useState<ControllerPolicy | null>(null);
+  const [controllerTrackingWarning, setControllerTrackingWarning] = useState<
+    string | null
+  >(null);
+  const [nowTick, setNowTick] = useState(0);
 
   const [groupVibrateIntensity, setGroupVibrateIntensity] = useState(10);
   const [groupVibrateDuration, setGroupVibrateDuration] = useState(1);
 
   const [groupShockIntensity, setGroupShockIntensity] = useState(5);
-  const [groupShockDuration, setGroupShockDuration] = useState(.3);
+  const [groupShockDuration, setGroupShockDuration] = useState(0.3);
   const [groupShockWarning, setGroupShockWarning] = useState(false);
   const [groupShockWarningLevel, setGroupShockWarningLevel] = useState(1);
 
@@ -75,6 +119,80 @@ export function BundleControlPanel({
       ? `${cleanTitle} Control | PiShock Bundle Links`
       : "PiShock Bundle Control | PiShock Bundle Links";
   }, [bundleTitle]);
+
+  useEffect(() => {
+    setSessionId(createLocalSessionId());
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(
+      () => setNowTick((value) => value + 1),
+      1000,
+    );
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (!accessGranted || !username.trim() || !sessionId || bundleDisabled)
+      return;
+
+    let active = true;
+
+    async function sendPresence() {
+      try {
+        const response = await fetch(
+          `/api/bundles/${bundleId}/controllers/presence`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              sessionId,
+              username: username.trim(),
+              accessPassword,
+            }),
+          },
+        );
+
+        const result = await response.json();
+
+        if (!active) return;
+
+        if (!response.ok || !result.ok) {
+          setControllerTrackingWarning(
+            result.error || "Could not update controller presence.",
+          );
+          return;
+        }
+
+        setControllerTrackingWarning(result.warning ?? null);
+
+        if (result.policy) {
+          setControllerPolicy(result.policy as ControllerPolicy);
+        }
+      } catch {
+        if (active) {
+          setControllerTrackingWarning("Could not update controller presence.");
+        }
+      }
+    }
+
+    sendPresence();
+    const intervalId = window.setInterval(sendPresence, 5000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    accessGranted,
+    username,
+    accessPassword,
+    sessionId,
+    bundleDisabled,
+    bundleId,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -96,6 +214,10 @@ export function BundleControlPanel({
 
         if (typeof result.title === "string" && result.title.trim()) {
           setBundleTitle(result.title);
+        }
+
+        if (Array.isArray(result.links)) {
+          setLinks(result.links as StoredLink[]);
         }
 
         setBundleDisabled(Boolean(result.disabled));
@@ -153,20 +275,43 @@ export function BundleControlPanel({
   }
 
   const selectableLinks = useMemo(() => {
-    return links.filter((link) => !link.paused);
+    return links.filter((link) => !link.paused && !link.disabled);
+  }, [links]);
+
+  useEffect(() => {
+    setSelectedUuids((current) => {
+      const selectableUuids = new Set(
+        links
+          .filter((link) => !link.paused && !link.disabled)
+          .map((link) => link.uuid),
+      );
+      const next = current.filter((uuid) => selectableUuids.has(uuid));
+
+      return next.length === current.length ? current : next;
+    });
   }, [links]);
 
   const selectedLinks = useMemo(() => {
-    return links.filter((link) => selectedUuids.includes(link.uuid));
+    return links.filter(
+      (link) =>
+        selectedUuids.includes(link.uuid) && !link.paused && !link.disabled,
+    );
   }, [links, selectedUuids]);
 
   const selectedCount = selectedLinks.length;
+  const controllerBlocked = Boolean(controllerPolicy?.blocked);
+  const shockCooldownRemaining = getShockCooldownRemaining(controllerPolicy);
+  const selectedForcedWarnings = selectedLinks.filter((link) =>
+    Boolean(link.forceWarning),
+  );
+  void nowTick;
 
   const selectedVibrateMaxIntensity = Math.max(
     0,
     ...selectedLinks.map(
-      (link) => link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity
-    )
+      (link) =>
+        link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity,
+    ),
   );
 
   const selectedVibrateMaxDurationSeconds = Math.max(
@@ -176,15 +321,16 @@ export function BundleControlPanel({
         link.vibrateDurationLimitSeconds ??
         link.durationLimitSeconds ??
         link.maxDurationSeconds ??
-        Math.floor(link.maxDuration / 1000)
-    )
+        Math.floor(link.maxDuration / 1000),
+    ),
   );
 
   const selectedShockMaxIntensity = Math.max(
     0,
     ...selectedLinks.map(
-      (link) => link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity
-    )
+      (link) =>
+        link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity,
+    ),
   );
 
   const selectedShockMaxDurationSeconds = Math.max(
@@ -194,8 +340,8 @@ export function BundleControlPanel({
         link.shockDurationLimitSeconds ??
         link.durationLimitSeconds ??
         link.maxDurationSeconds ??
-        Math.floor(link.maxDuration / 1000)
-    )
+        Math.floor(link.maxDuration / 1000),
+    ),
   );
 
   function toggleSelected(uuid: string, selected: boolean) {
@@ -216,6 +362,17 @@ export function BundleControlPanel({
     setSelectedUuids([]);
   }
 
+  function noteShockSent() {
+    setControllerPolicy((current) =>
+      current
+        ? {
+            ...current,
+            lastShockAt: new Date().toISOString(),
+          }
+        : current,
+    );
+  }
+
   async function sendToSelected(
     mode: CommandMode,
     options?: {
@@ -223,7 +380,7 @@ export function BundleControlPanel({
       duration?: number;
       warning?: boolean;
       warningLevel?: number;
-    }
+    },
   ) {
     setGroupMessage(null);
     setGroupLoading(mode);
@@ -237,7 +394,18 @@ export function BundleControlPanel({
         throw new Error("Please select at least one shocker.");
       }
 
+      if (controllerBlocked) {
+        throw new Error(
+          "Your inputs are currently blocked by the bundle manager.",
+        );
+      }
+
+      if (mode === "s" && shockCooldownRemaining > 0) {
+        throw new Error(`Shock is on cooldown for ${shockCooldownRemaining}s.`);
+      }
+
       const usableLinks = selectedLinks.filter((link) => {
+        if (link.paused || link.disabled) return false;
         if (mode === "v") return link.vibrateEnabled;
         if (mode === "s") return link.shockEnabled;
         return true;
@@ -258,11 +426,20 @@ export function BundleControlPanel({
               uuid: link.uuid,
               username: username.trim(),
               accessPassword,
+              sessionId,
               mode,
-              intensity: mode === "e" ? 0 : options?.intensity ?? 0,
-              duration: mode === "e" ? 0 : options?.duration ?? 0,
-              warning: options?.warning ?? false,
-              warningLevel: options?.warning ? options.warningLevel ?? 1 : 0,
+              intensity: mode === "e" ? 0 : (options?.intensity ?? 0),
+              duration: mode === "e" ? 0 : (options?.duration ?? 0),
+              warning:
+                mode === "s"
+                  ? Boolean(link.forceWarning) || (options?.warning ?? false)
+                  : (options?.warning ?? false),
+              warningLevel:
+                mode === "s" && link.forceWarning
+                  ? normalizeWarningLevel(link.forceWarningLevel)
+                  : options?.warning
+                    ? (options.warningLevel ?? 1)
+                    : 0,
               hold: false,
             }),
           });
@@ -274,21 +451,27 @@ export function BundleControlPanel({
             ok: response.ok && result.ok,
             result,
           };
-        })
+        }),
       );
 
       const failed = results.filter((item) => !item.ok);
 
       if (failed.length > 0) {
         setGroupMessage(
-          `${results.length - failed.length}/${results.length} Commands successful. ${failed.length} failed.`
+          `${results.length - failed.length}/${results.length} Commands successful. ${failed.length} failed.`,
         );
         return;
       }
 
       setGroupMessage(`${results.length} command(s) sent successfully.`);
+
+      if (mode === "s") {
+        noteShockSent();
+      }
     } catch (error) {
-      setGroupMessage(error instanceof Error ? error.message : "Unbekannter Fehler.");
+      setGroupMessage(
+        error instanceof Error ? error.message : "Unbekannter Fehler.",
+      );
     } finally {
       setGroupLoading(null);
     }
@@ -369,194 +552,238 @@ export function BundleControlPanel({
             Show advanced information
           </label>
         </div>
+
+        {controllerBlocked && (
+          <div className="mt-4 rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-100">
+            Your inputs are currently blocked by the bundle manager.
+          </div>
+        )}
+
+        {shockCooldownRemaining > 0 && (
+          <div className="mt-4 rounded-lg border border-yellow-800 bg-yellow-950 px-4 py-3 text-sm text-yellow-100">
+            Shock cooldown active: {shockCooldownRemaining}s remaining.
+          </div>
+        )}
+
+        {controllerTrackingWarning && showAdvanced && (
+          <div className="mt-4 rounded-lg border border-yellow-800 bg-yellow-950 px-4 py-3 text-sm text-yellow-100">
+            {controllerTrackingWarning}
+          </div>
+        )}
       </section>
 
       {selectedCount > 1 && (
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
             <div>
-                <h2 className="text-xl font-semibold">Control selected shockers</h2>
-                <p className="mt-1 text-sm text-zinc-400">
+              <h2 className="text-xl font-semibold">
+                Control selected shockers
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
                 {selectedCount} shockers selected
-                </p>
+              </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
-                <button
+              <button
                 onClick={selectAll}
                 className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800"
-                >
+              >
                 Select all
-                </button>
+              </button>
 
-                <button
+              <button
                 onClick={clearSelection}
                 className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800"
-                >
+              >
                 Clear selection
-                </button>
+              </button>
             </div>
-            </div>
+          </div>
 
-            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
             <section className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <h3 className="font-semibold">Vibrate selected</h3>
+              <h3 className="font-semibold">Vibrate selected</h3>
 
-                <div className="mt-4 grid gap-4">
+              <div className="mt-4 grid gap-4">
                 <label className="grid gap-2">
-                    <div className="flex justify-between text-sm">
+                  <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Intensity</span>
                     <span className="font-mono">{groupVibrateIntensity}</span>
-                    </div>
+                  </div>
 
-                    <input
+                  <input
                     type="range"
                     min={0}
                     max={selectedVibrateMaxIntensity}
                     value={groupVibrateIntensity}
                     onChange={(event) =>
-                        setGroupVibrateIntensity(Number(event.target.value))
+                      setGroupVibrateIntensity(Number(event.target.value))
                     }
-                    />
+                  />
                 </label>
 
                 <label className="grid gap-2">
-                    <div className="flex justify-between text-sm">
+                  <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Duration</span>
                     <span className="font-mono">{groupVibrateDuration} s</span>
-                    </div>
+                  </div>
 
-                    <input
+                  <input
                     type="range"
                     min={0.1}
                     max={selectedVibrateMaxDurationSeconds}
                     step={0.1}
                     value={groupVibrateDuration}
                     onChange={(event) =>
-                        setGroupVibrateDuration(Number(event.target.value))
+                      setGroupVibrateDuration(Number(event.target.value))
                     }
-                    />
+                  />
                 </label>
 
                 <button
-                    onClick={() =>
+                  onClick={() =>
                     sendToSelected("v", {
-                        intensity: groupVibrateIntensity,
-                        duration: groupVibrateDuration,
-                        warning: false,
-                        warningLevel: 0,
+                      intensity: groupVibrateIntensity,
+                      duration: groupVibrateDuration,
+                      warning: false,
+                      warningLevel: 0,
                     })
-                    }
-                    disabled={!username.trim() || selectedCount === 0 || groupLoading !== null}
-                    className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  }
+                  disabled={
+                    !username.trim() ||
+                    controllerBlocked ||
+                    selectedCount === 0 ||
+                    groupLoading !== null
+                  }
+                  className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                    {groupLoading === "v" ? "Sending..." : "Vibrate selected"}
+                  {groupLoading === "v" ? "Sending..." : "Vibrate selected"}
                 </button>
-                </div>
+              </div>
             </section>
 
             <section className="rounded-xl border border-red-900 bg-zinc-950 p-4">
-                <h3 className="font-semibold text-red-200">Shock selected</h3>
+              <h3 className="font-semibold text-red-200">Shock selected</h3>
 
-                <div className="mt-4 grid gap-4">
+              <div className="mt-4 grid gap-4">
                 <label className="grid gap-2">
-                    <div className="flex justify-between text-sm">
+                  <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Intensity</span>
                     <span className="font-mono">{groupShockIntensity}</span>
-                    </div>
+                  </div>
 
-                    <input
+                  <input
                     type="range"
                     min={0}
                     max={selectedShockMaxIntensity}
                     value={groupShockIntensity}
                     onChange={(event) =>
-                        setGroupShockIntensity(Number(event.target.value))
+                      setGroupShockIntensity(Number(event.target.value))
                     }
-                    />
+                  />
                 </label>
 
                 <label className="grid gap-2">
-                    <div className="flex justify-between text-sm">
+                  <div className="flex justify-between text-sm">
                     <span className="text-zinc-300">Duration</span>
                     <span className="font-mono">{groupShockDuration} s</span>
-                    </div>
+                  </div>
 
-                    <input
+                  <input
                     type="range"
                     min={0.1}
                     max={selectedShockMaxDurationSeconds}
                     step={0.1}
                     value={groupShockDuration}
                     onChange={(event) =>
-                        setGroupShockDuration(Number(event.target.value))
+                      setGroupShockDuration(Number(event.target.value))
                     }
-                    />
+                  />
                 </label>
 
                 <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-                    <label className="flex items-center gap-3 text-sm">
+                  <label className="flex items-center gap-3 text-sm">
                     <input
-                        type="checkbox"
-                        checked={groupShockWarning}
-                        onChange={(event) => setGroupShockWarning(event.target.checked)}
+                      type="checkbox"
+                      checked={groupShockWarning}
+                      onChange={(event) =>
+                        setGroupShockWarning(event.target.checked)
+                      }
                     />
                     <span>Enable warning</span>
-                    </label>
+                  </label>
 
-                    {groupShockWarning && (
+                  {groupShockWarning && (
                     <label className="mt-3 grid gap-2 text-sm">
-                        <span className="text-zinc-300">Warning Level</span>
+                      <span className="text-zinc-300">Warning Level</span>
 
-                        <select
+                      <select
                         value={groupShockWarningLevel}
                         onChange={(event) =>
-                            setGroupShockWarningLevel(Number(event.target.value))
+                          setGroupShockWarningLevel(Number(event.target.value))
                         }
                         className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 outline-none focus:border-blue-500"
-                        >
+                      >
                         <option value={1}>Level 1</option>
                         <option value={2}>Level 2</option>
                         <option value={3}>Level 3</option>
-                        </select>
+                      </select>
                     </label>
-                    )}
+                  )}
                 </div>
+
+                {selectedForcedWarnings.length > 0 && (
+                  <p className="text-sm text-yellow-200">
+                    {selectedForcedWarnings.length} selected shocker(s) require
+                    a manager-set warning level.
+                  </p>
+                )}
 
                 <button
-                    onClick={() =>
+                  onClick={() =>
                     sendToSelected("s", {
-                        intensity: groupShockIntensity,
-                        duration: groupShockDuration,
-                        warning: groupShockWarning,
-                        warningLevel: groupShockWarningLevel,
+                      intensity: groupShockIntensity,
+                      duration: groupShockDuration,
+                      warning: groupShockWarning,
+                      warningLevel: groupShockWarningLevel,
                     })
-                    }
-                    disabled={!username.trim() || selectedCount === 0 || groupLoading !== null}
-                    className="rounded-lg bg-red-700 px-5 py-3 text-sm font-semibold hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                  }
+                  disabled={
+                    !username.trim() ||
+                    controllerBlocked ||
+                    shockCooldownRemaining > 0 ||
+                    selectedCount === 0 ||
+                    groupLoading !== null
+                  }
+                  className="rounded-lg bg-red-700 px-5 py-3 text-sm font-semibold hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                    {groupLoading === "s" ? "Sending..." : "Shock selected"}
+                  {groupLoading === "s" ? "Sending..." : "Shock selected"}
                 </button>
-                </div>
+              </div>
             </section>
-            </div>
+          </div>
 
-            <button
+          <button
             onClick={() => sendToSelected("e")}
-            disabled={!username.trim() || selectedCount === 0 || groupLoading !== null}
+            disabled={
+              !username.trim() ||
+              controllerBlocked ||
+              selectedCount === 0 ||
+              groupLoading !== null
+            }
             className="mt-4 rounded-lg border border-zinc-700 px-5 py-3 text-sm font-semibold hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+          >
             {groupLoading === "e" ? "Stopping..." : "Stop selected"}
-            </button>
+          </button>
 
-            {showAdvanced && groupMessage && (
+          {showAdvanced && groupMessage && (
             <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-200">
-                {groupMessage}
+              {groupMessage}
             </div>
-            )}
+          )}
         </section>
       )}
-      
 
       <section className="mt-6 grid gap-4">
         {links.map((link) => (
@@ -569,6 +796,10 @@ export function BundleControlPanel({
             selected={selectedUuids.includes(link.uuid)}
             onSelectedChange={(selected) => toggleSelected(link.uuid, selected)}
             showAdvanced={showAdvanced}
+            sessionId={sessionId}
+            controllerBlocked={controllerBlocked}
+            shockCooldownRemainingSeconds={shockCooldownRemaining}
+            onShockCommandSent={noteShockSent}
           />
         ))}
       </section>
@@ -593,8 +824,8 @@ function DisabledBundleDialog({ title }: { title: string }) {
         </h2>
 
         <p className="mt-3 text-sm text-zinc-300">
-          {title.trim() || "This bundle"} is currently not available. Controls remain
-          blocked until the link is activated again.
+          {title.trim() || "This bundle"} is currently not available. Controls
+          remain blocked until the link is activated again.
         </p>
 
         <p className="mt-4 text-xs text-zinc-500">

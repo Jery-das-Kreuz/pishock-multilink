@@ -1,10 +1,10 @@
 export const runtime = "nodejs";
 
-import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { hashAccessPassword } from "@/lib/accessPassword";
+import { verifyEditToken } from "@/lib/bundleTokens";
 
 type PiShockLinkInfo = {
   LinkId: number;
@@ -35,6 +35,10 @@ const managedLinkSchema = z.object({
 
   shockIntensityLimit: z.number().int().min(0).max(100),
   shockDurationLimitSeconds: z.number().min(0.1).max(60),
+
+  forceWarning: z.boolean().optional().default(false),
+  forceWarningLevel: z.number().int().min(1).max(3).optional().default(1),
+  disabled: z.boolean().optional().default(false),
 });
 
 const updateBundleSchema = z.object({
@@ -54,17 +58,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
 }
 
-function safeTokenEquals(a: string, b: string): boolean {
-  const aBuffer = Buffer.from(a);
-  const bBuffer = Buffer.from(b);
-
-  if (aBuffer.length !== bBuffer.length) {
-    return false;
-  }
-
-  return timingSafeEqual(aBuffer, bBuffer);
-}
-
 async function fetchPiShockLinkInfo(uuid: string): Promise<PiShockLinkInfo> {
   const response = await fetch(`https://api.pishock.com/Links/${uuid}`, {
     cache: "no-store",
@@ -75,20 +68,6 @@ async function fetchPiShockLinkInfo(uuid: string): Promise<PiShockLinkInfo> {
   }
 
   return response.json();
-}
-
-async function verifyEditToken(id: string, token: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
-    .from("bundles")
-    .select("id, edit_token")
-    .eq("id", id)
-    .single();
-
-  if (error || !data || !data.edit_token) {
-    return false;
-  }
-
-  return safeTokenEquals(String(data.edit_token), token);
 }
 
 export async function GET(
@@ -223,7 +202,9 @@ export async function PUT(
           shockDurationLimitSeconds,
 
           forceLogin: info.ForceLogin,
-          forceWarning: info.ForceWarning,
+          forceWarning: Boolean(link.forceWarning),
+          forceWarningLevel: clamp(link.forceWarningLevel ?? 1, 1, 3),
+          disabled: Boolean(link.disabled),
           paused: info.Paused,
           activateOnLoad: info.ActivateOnLoad,
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 type PiShockLinkInfo = {
   LinkId: number;
@@ -51,6 +51,8 @@ type ManagedLink = {
 
   forceLogin: boolean;
   forceWarning: boolean;
+  forceWarningLevel: number;
+  disabled: boolean;
   paused: boolean;
   activateOnLoad: boolean;
 
@@ -67,6 +69,17 @@ type BundleData = {
   created_at: string;
   expires_at: string | null;
   hasAccessPassword?: boolean;
+};
+
+type ControllerSession = {
+  sessionId: string;
+  username: string;
+  blocked: boolean;
+  shockCooldownSeconds: number;
+  remainingShockCooldownSeconds: number;
+  lastShockAt: string | null;
+  connectedAt: string;
+  lastSeenAt: string;
 };
 
 type Props = {
@@ -129,13 +142,19 @@ function formatSeconds(value: number): string {
   return `${rounded}s`;
 }
 
-function normalizeLink(input: Partial<ManagedLink> & { uuid: string }): ManagedLink {
+function normalizeWarningLevel(value: unknown): number {
+  return clamp(Math.round(numberOrFallback(value, 1)), 1, 3);
+}
+
+function normalizeLink(
+  input: Partial<ManagedLink> & { uuid: string },
+): ManagedLink {
   const maxIntensity = clamp(numberOrFallback(input.maxIntensity, 100), 0, 100);
   const maxDuration = Math.max(100, numberOrFallback(input.maxDuration, 1000));
 
   const maxDurationSeconds = Math.max(
     0.1,
-    numberOrFallback(input.maxDurationSeconds, Math.floor(maxDuration / 1000))
+    numberOrFallback(input.maxDurationSeconds, Math.floor(maxDuration / 1000)),
   );
 
   const legacyIntensityLimit = input.intensityLimit;
@@ -161,38 +180,43 @@ function normalizeLink(input: Partial<ManagedLink> & { uuid: string }): ManagedL
     vibrateIntensityLimit: clamp(
       numberOrFallback(
         input.vibrateIntensityLimit ?? legacyIntensityLimit,
-        maxIntensity
+        maxIntensity,
       ),
       0,
-      maxIntensity
+      maxIntensity,
     ),
 
     vibrateDurationLimitSeconds: clamp(
       numberOrFallback(
         input.vibrateDurationLimitSeconds ?? legacyDurationLimitSeconds,
-        maxDurationSeconds
+        maxDurationSeconds,
       ),
       0.1,
-      maxDurationSeconds
+      maxDurationSeconds,
     ),
 
     shockIntensityLimit: clamp(
-      numberOrFallback(input.shockIntensityLimit ?? legacyIntensityLimit, maxIntensity),
+      numberOrFallback(
+        input.shockIntensityLimit ?? legacyIntensityLimit,
+        maxIntensity,
+      ),
       0,
-      maxIntensity
+      maxIntensity,
     ),
 
     shockDurationLimitSeconds: clamp(
       numberOrFallback(
         input.shockDurationLimitSeconds ?? legacyDurationLimitSeconds,
-        maxDurationSeconds
+        maxDurationSeconds,
       ),
       0.1,
-      maxDurationSeconds
+      maxDurationSeconds,
     ),
 
     forceLogin: Boolean(input.forceLogin),
     forceWarning: Boolean(input.forceWarning),
+    forceWarningLevel: normalizeWarningLevel(input.forceWarningLevel),
+    disabled: Boolean(input.disabled),
     paused: Boolean(input.paused),
     activateOnLoad: Boolean(input.activateOnLoad),
 
@@ -205,7 +229,7 @@ function normalizeLink(input: Partial<ManagedLink> & { uuid: string }): ManagedL
 function linkFromPiShockInfo(
   uuid: string,
   customName: string,
-  info: PiShockLinkInfo
+  info: PiShockLinkInfo,
 ): ManagedLink {
   const maxDurationSeconds = Math.max(0.1, Math.floor(info.MaxDuration / 1000));
 
@@ -233,7 +257,9 @@ function linkFromPiShockInfo(
     shockDurationLimitSeconds: maxDurationSeconds,
 
     forceLogin: info.ForceLogin,
-    forceWarning: info.ForceWarning,
+    forceWarning: Boolean(info.ForceWarning),
+    forceWarningLevel: 1,
+    disabled: false,
     paused: info.Paused,
     activateOnLoad: info.ActivateOnLoad,
 
@@ -243,9 +269,36 @@ function linkFromPiShockInfo(
   };
 }
 
+function buildSaveStateSnapshot(
+  title: string,
+  disabled: boolean,
+  links: ManagedLink[],
+  newAccessPassword: string,
+  clearAccessPassword: boolean,
+): string {
+  return JSON.stringify({
+    title,
+    disabled,
+    accessPassword: newAccessPassword.trim(),
+    clearAccessPassword,
+    links: links.map((link) => ({
+      name: link.name,
+      uuid: link.uuid,
+      vibrateIntensityLimit: link.vibrateIntensityLimit,
+      vibrateDurationLimitSeconds: link.vibrateDurationLimitSeconds,
+      shockIntensityLimit: link.shockIntensityLimit,
+      shockDurationLimitSeconds: link.shockDurationLimitSeconds,
+      forceWarning: link.forceWarning,
+      forceWarningLevel: link.forceWarningLevel,
+      disabled: link.disabled,
+    })),
+  });
+}
+
 export function ManageBundleEditor({ bundleId, token }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [disabled, setDisabled] = useState(false);
@@ -258,6 +311,20 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
   const [newAccessPassword, setNewAccessPassword] = useState("");
   const [clearAccessPassword, setClearAccessPassword] = useState(false);
 
+  const [controllersOpen, setControllersOpen] = useState(false);
+  const [controllersLoading, setControllersLoading] = useState(false);
+  const [controllersError, setControllersError] = useState<string | null>(null);
+  const [controllersSetupSql, setControllersSetupSql] = useState<string | null>(
+    null,
+  );
+  const [controllers, setControllers] = useState<ControllerSession[]>([]);
+  const [controllerCooldownDrafts, setControllerCooldownDrafts] = useState<
+    Record<string, string>
+  >({});
+  const [updatingControllerId, setUpdatingControllerId] = useState<
+    string | null
+  >(null);
+
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -265,6 +332,21 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
     if (typeof window === "undefined") return `/c/${bundleId}`;
     return `${window.location.origin}/c/${bundleId}`;
   }, [bundleId]);
+
+  const currentSnapshot = useMemo(
+    () =>
+      buildSaveStateSnapshot(
+        title,
+        disabled,
+        links,
+        newAccessPassword,
+        clearAccessPassword,
+      ),
+    [title, disabled, links, newAccessPassword, clearAccessPassword],
+  );
+
+  const hasUnsavedChanges =
+    !loading && savedSnapshot !== null && currentSnapshot !== savedSnapshot;
 
   useEffect(() => {
     const cleanTitle = title.trim();
@@ -285,7 +367,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         }
 
         const response = await fetch(
-          `/api/bundles/${bundleId}/manage?token=${encodeURIComponent(token)}`
+          `/api/bundles/${bundleId}/manage?token=${encodeURIComponent(token)}`,
         );
 
         const result = await response.json();
@@ -296,10 +378,21 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
 
         const bundle = result as BundleData;
 
-        setTitle(String(bundle.title ?? ""));
-        setDisabled(Boolean(bundle.disabled));
-        setLinks((bundle.links ?? []).map((link) => normalizeLink(link)));
+        const loadedTitle = String(bundle.title ?? "");
+        const loadedDisabled = Boolean(bundle.disabled);
+        const loadedLinks = (bundle.links ?? []).map((link) =>
+          normalizeLink(link),
+        );
+
+        setTitle(loadedTitle);
+        setDisabled(loadedDisabled);
+        setLinks(loadedLinks);
         setHasAccessPassword(Boolean(bundle.hasAccessPassword));
+        setNewAccessPassword("");
+        setClearAccessPassword(false);
+        setSavedSnapshot(
+          buildSaveStateSnapshot(loadedTitle, loadedDisabled, loadedLinks, "", false),
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error.");
       } finally {
@@ -310,11 +403,20 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
     loadBundle();
   }, [bundleId, token]);
 
+  useEffect(() => {
+    if (!controllersOpen) return;
+
+    loadControllers(true);
+    const intervalId = window.setInterval(() => loadControllers(true), 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [controllersOpen, bundleId, token]);
+
   function updateLink(uuid: string, patch: Partial<ManagedLink>) {
     setLinks((current) =>
       current.map((link) =>
-        link.uuid === uuid ? normalizeLink({ ...link, ...patch }) : link
-      )
+        link.uuid === uuid ? normalizeLink({ ...link, ...patch }) : link,
+      ),
     );
   }
 
@@ -333,7 +435,9 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
 
       const uuid = extractPiShockLinkId(newLinkInput);
 
-      if (links.some((link) => link.uuid.toLowerCase() === uuid.toLowerCase())) {
+      if (
+        links.some((link) => link.uuid.toLowerCase() === uuid.toLowerCase())
+      ) {
         throw new Error("This PiShock link is already in the bundle.");
       }
 
@@ -352,6 +456,158 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
       setMessage("Shocker added. Save changes to publish this update.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error.");
+    }
+  }
+
+  function patchControllerLocal(
+    sessionId: string,
+    patch: Partial<ControllerSession>,
+  ) {
+    setControllers((current) =>
+      current.map((controller) =>
+        controller.sessionId === sessionId
+          ? { ...controller, ...patch }
+          : controller,
+      ),
+    );
+  }
+
+  async function loadControllers(silent = false) {
+    if (!token) return;
+
+    if (!silent) {
+      setControllersLoading(true);
+    }
+
+    setControllersError(null);
+    setControllersSetupSql(null);
+
+    try {
+      const response = await fetch(
+        `/api/bundles/${bundleId}/controllers?token=${encodeURIComponent(token)}`,
+        { cache: "no-store" },
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (result.setupSql) {
+          setControllersSetupSql(String(result.setupSql));
+        }
+
+        throw new Error(
+          result.error || "Could not load connected controllers.",
+        );
+      }
+
+      const sessions = (result.sessions ?? []) as ControllerSession[];
+      setControllers(sessions);
+      setControllerCooldownDrafts((current) => {
+        const activeSessionIds = new Set(
+          sessions.map((session) => session.sessionId),
+        );
+        return Object.fromEntries(
+          Object.entries(current).filter(([sessionId]) =>
+            activeSessionIds.has(sessionId),
+          ),
+        );
+      });
+    } catch (err) {
+      setControllersError(
+        err instanceof Error ? err.message : "Unknown error.",
+      );
+    } finally {
+      if (!silent) {
+        setControllersLoading(false);
+      }
+    }
+  }
+
+  function setControllerCooldownDraft(sessionId: string, value: string) {
+    setControllerCooldownDrafts((current) => ({
+      ...current,
+      [sessionId]: value,
+    }));
+  }
+
+  function getControllerCooldownDraft(controller: ControllerSession): string {
+    return (
+      controllerCooldownDrafts[controller.sessionId] ??
+      String(controller.shockCooldownSeconds)
+    );
+  }
+
+  async function saveControllerCooldown(controller: ControllerSession) {
+    const rawValue = getControllerCooldownDraft(controller).trim();
+    const parsedValue = Number(rawValue);
+
+    if (!rawValue || !Number.isFinite(parsedValue)) {
+      setControllersError("Please enter a valid cooldown in seconds.");
+      return;
+    }
+
+    await updateController(controller.sessionId, {
+      shockCooldownSeconds: clamp(Math.round(parsedValue), 0, 3600),
+    });
+  }
+
+  async function updateController(
+    sessionId: string,
+    patch: Partial<ControllerSession>,
+  ) {
+    setUpdatingControllerId(sessionId);
+    setControllersError(null);
+    setControllersSetupSql(null);
+
+    try {
+      const response = await fetch(
+        `/api/bundles/${bundleId}/controllers/${encodeURIComponent(sessionId)}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            token,
+            blocked: patch.blocked,
+            shockCooldownSeconds:
+              typeof patch.shockCooldownSeconds === "number"
+                ? Math.max(
+                    0,
+                    Math.min(3600, Math.round(patch.shockCooldownSeconds)),
+                  )
+                : undefined,
+          }),
+        },
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (result.setupSql) {
+          setControllersSetupSql(String(result.setupSql));
+        }
+
+        throw new Error(result.error || "Could not update controller.");
+      }
+
+      if (result.session) {
+        patchControllerLocal(sessionId, result.session as ControllerSession);
+
+        if (typeof patch.shockCooldownSeconds === "number") {
+          setControllerCooldownDrafts((current) => {
+            const { [sessionId]: _savedDraft, ...remainingDrafts } = current;
+            void _savedDraft;
+            return remainingDrafts;
+          });
+        }
+      }
+    } catch (err) {
+      setControllersError(
+        err instanceof Error ? err.message : "Unknown error.",
+      );
+    } finally {
+      setUpdatingControllerId(null);
     }
   }
 
@@ -389,6 +645,10 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
 
             shockIntensityLimit: link.shockIntensityLimit,
             shockDurationLimitSeconds: link.shockDurationLimitSeconds,
+
+            forceWarning: link.forceWarning,
+            forceWarningLevel: link.forceWarningLevel,
+            disabled: link.disabled,
           })),
         }),
       });
@@ -405,6 +665,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         setHasAccessPassword(true);
       }
 
+      setSavedSnapshot(buildSaveStateSnapshot(title, disabled, links, "", false));
       setNewAccessPassword("");
       setClearAccessPassword(false);
       setMessage("Changes saved successfully.");
@@ -440,7 +701,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
+    <main className="min-h-screen bg-zinc-950 pb-24 text-zinc-100">
       <div className="mx-auto max-w-6xl px-6 py-10">
         <header className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
           <h1 className="text-3xl font-bold">Manage bundle</h1>
@@ -542,6 +803,149 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         </section>
 
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div>
+              <h2 className="text-xl font-semibold">Live controllers</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                See users who are currently connected, block or re-enable their
+                inputs, and set a per-user shock cooldown.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const nextOpen = !controllersOpen;
+                setControllersOpen(nextOpen);
+
+                if (nextOpen) {
+                  void loadControllers(false);
+                }
+              }}
+              className="rounded-lg border border-blue-500/60 px-4 py-2 text-sm font-semibold text-blue-200 hover:bg-blue-950"
+            >
+              {controllersOpen
+                ? "Hide connected users"
+                : "Show connected users"}
+            </button>
+          </div>
+
+          {controllersOpen && (
+            <div className="mt-5 grid gap-4">
+              {controllersLoading && (
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-300">
+                  Loading connected users...
+                </div>
+              )}
+
+              {controllersError && (
+                <div className="rounded-xl border border-yellow-800 bg-yellow-950 p-4 text-sm text-yellow-100">
+                  <p>{controllersError}</p>
+
+                  {controllersSetupSql && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer font-medium">
+                        Show Supabase setup SQL
+                      </summary>
+                      <pre className="mt-3 overflow-x-auto rounded-lg border border-yellow-800 bg-zinc-950 p-3 text-xs text-zinc-100">
+                        {controllersSetupSql}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {!controllersLoading &&
+                !controllersError &&
+                controllers.length === 0 && (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
+                    No one is actively connected right now. Users appear here
+                    after they enter the public control page.
+                  </div>
+                )}
+
+              {controllers.map((controller) => (
+                <article
+                  key={controller.sessionId}
+                  className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+                >
+                  <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold">{controller.username}</h3>
+                        {controller.blocked ? (
+                          <Badge variant="danger">Blocked</Badge>
+                        ) : (
+                          <Badge variant="success">Inputs enabled</Badge>
+                        )}
+                      </div>
+
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Last seen{" "}
+                        {new Date(controller.lastSeenAt).toLocaleTimeString()} ·
+                        Session {controller.sessionId.slice(0, 8)}
+                      </p>
+
+                      {controller.lastShockAt && (
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Last shock{" "}
+                          {new Date(
+                            controller.lastShockAt,
+                          ).toLocaleTimeString()}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-end">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateController(controller.sessionId, {
+                            blocked: !controller.blocked,
+                          })
+                        }
+                        disabled={updatingControllerId === controller.sessionId}
+                        className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {controller.blocked ? "Enable inputs" : "Block inputs"}
+                      </button>
+
+                      <label className="grid gap-2 text-sm">
+                        <span className="text-zinc-300">
+                          Shock cooldown seconds
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={3600}
+                          value={getControllerCooldownDraft(controller)}
+                          onChange={(event) =>
+                            setControllerCooldownDraft(
+                              controller.sessionId,
+                              event.target.value,
+                            )
+                          }
+                          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 outline-none focus:border-blue-500"
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => saveControllerCooldown(controller)}
+                        disabled={updatingControllerId === controller.sessionId}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Save limit
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
           <h2 className="text-xl font-semibold">Add shocker</h2>
 
           <div className="mt-5 grid gap-4 md:grid-cols-[1fr_2fr_auto]">
@@ -606,7 +1010,9 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-lg font-semibold">{link.name}</h3>
 
-                    {link.paused ? (
+                    {link.disabled ? (
+                      <Badge variant="danger">Disabled</Badge>
+                    ) : link.paused ? (
                       <Badge variant="danger">Paused</Badge>
                     ) : (
                       <Badge variant="success">Active</Badge>
@@ -624,15 +1030,38 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                   <p className="mt-2 break-all font-mono text-xs text-zinc-500">
                     {link.uuid}
                   </p>
+
+                  {link.disabled && (
+                    <p className="mt-2 text-sm text-yellow-200">
+                      Disabled shockers stay visible on the user page, but all
+                      commands for this shocker are blocked after saving.
+                    </p>
+                  )}
                 </div>
 
-                <button
-                  onClick={() => removeLink(link.uuid)}
-                  disabled={links.length <= 1}
-                  className="rounded-lg border border-red-800 px-4 py-2 text-sm font-medium text-red-200 hover:bg-red-950 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Remove
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateLink(link.uuid, { disabled: !link.disabled })
+                    }
+                    className={
+                      link.disabled
+                        ? "rounded-lg border border-green-700 px-4 py-2 text-sm font-medium text-green-200 hover:bg-green-950"
+                        : "rounded-lg border border-yellow-700 px-4 py-2 text-sm font-medium text-yellow-200 hover:bg-yellow-950"
+                    }
+                  >
+                    {link.disabled ? "Enable shocker" : "Disable shocker"}
+                  </button>
+
+                  <button
+                    onClick={() => removeLink(link.uuid)}
+                    disabled={links.length <= 1}
+                    className="rounded-lg border border-red-800 px-4 py-2 text-sm font-medium text-red-200 hover:bg-red-950 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
 
               <div className="mt-5 grid gap-4">
@@ -686,9 +1115,24 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                     }
                   />
                 </div>
+
+                <ForceWarningPanel
+                  enabled={link.forceWarning}
+                  warningLevel={link.forceWarningLevel}
+                  onEnabledChange={(value) =>
+                    updateLink(link.uuid, {
+                      forceWarning: value,
+                    })
+                  }
+                  onWarningLevelChange={(value) =>
+                    updateLink(link.uuid, {
+                      forceWarningLevel: normalizeWarningLevel(value),
+                    })
+                  }
+                />
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <InfoBox
                   label="Shock"
                   value={link.shockEnabled ? "Allowed" : "Off"}
@@ -697,7 +1141,22 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                   label="Vibrate"
                   value={link.vibrateEnabled ? "Allowed" : "Off"}
                 />
-                <InfoBox label="Beep" value={link.beepEnabled ? "Allowed" : "Off"} />
+                <InfoBox
+                  label="Beep"
+                  value={link.beepEnabled ? "Allowed" : "Off"}
+                />
+                <InfoBox
+                  label="Forced warning"
+                  value={
+                    link.forceWarning
+                      ? `Level ${link.forceWarningLevel}`
+                      : "Off"
+                  }
+                />
+                <InfoBox
+                  label="Manager status"
+                  value={link.disabled ? "Disabled" : "Enabled"}
+                />
                 <InfoBox
                   label="Remaining"
                   value={
@@ -711,7 +1170,85 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
           ))}
         </section>
       </div>
+
+      {hasUnsavedChanges && (
+        <div
+          aria-live="polite"
+          className="fixed bottom-4 left-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-full border border-yellow-700/70 bg-zinc-900/95 px-4 py-3 text-sm text-yellow-100 shadow-2xl shadow-black/40 backdrop-blur"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className="min-w-0 truncate">
+              Don’t forget to save your changes.
+            </span>
+
+            <button
+              type="button"
+              onClick={saveChanges}
+              disabled={saving}
+              className="shrink-0 rounded-full bg-green-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+function ForceWarningPanel({
+  enabled,
+  warningLevel,
+  onEnabledChange,
+  onWarningLevelChange,
+}: {
+  enabled: boolean;
+  warningLevel: number;
+  onEnabledChange: (value: boolean) => void;
+  onWarningLevelChange: (value: number) => void;
+}) {
+  const safeWarningLevel = normalizeWarningLevel(warningLevel);
+
+  return (
+    <section className="rounded-xl border border-yellow-800 bg-zinc-950 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h4 className="font-semibold text-yellow-200">
+            Forced shock warning
+          </h4>
+          <p className="mt-1 text-sm text-zinc-400">
+            When enabled, users see the selected warning duration and every shock
+            command uses it.
+          </p>
+        </div>
+
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(event) => onEnabledChange(event.target.checked)}
+          />
+          <span>Enable</span>
+        </label>
+      </div>
+
+      {enabled && (
+        <label className="mt-4 grid gap-2 text-sm">
+          <span className="text-zinc-300">Warning duration shown to users</span>
+          <select
+            value={safeWarningLevel}
+            onChange={(event) =>
+              onWarningLevelChange(Number(event.target.value))
+            }
+            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 outline-none focus:border-blue-500"
+          >
+            <option value={1}>Short</option>
+            <option value={2}>Medium</option>
+            <option value={3}>Long</option>
+          </select>
+        </label>
+      )}
+    </section>
   );
 }
 
@@ -734,8 +1271,7 @@ function LimitPanel({
   onIntensityChange: (value: number) => void;
   onDurationChange: (value: number) => void;
 }) {
-  const borderClass =
-    tone === "danger" ? "border-red-900" : "border-zinc-800";
+  const borderClass = tone === "danger" ? "border-red-900" : "border-zinc-800";
   const titleClass = tone === "danger" ? "text-red-200" : "";
 
   const safeMaxIntensity = Math.max(0, maxIntensity);
@@ -772,7 +1308,7 @@ function LimitPanel({
             value={String(safeIntensityValue)}
             onChange={(event) =>
               onIntensityChange(
-                clamp(Number(event.target.value), 0, safeMaxIntensity)
+                clamp(Number(event.target.value), 0, safeMaxIntensity),
               )
             }
             className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
@@ -805,7 +1341,7 @@ function LimitPanel({
             value={String(safeDurationValue)}
             onChange={(event) =>
               onDurationChange(
-                clamp(Number(event.target.value), 0.1, safeMaxDurationSeconds)
+                clamp(Number(event.target.value), 0.1, safeMaxDurationSeconds),
               )
             }
             className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
@@ -816,13 +1352,7 @@ function LimitPanel({
   );
 }
 
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
+function InfoBox({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
       <div className="text-xs uppercase tracking-wide text-zinc-500">
@@ -837,7 +1367,7 @@ function Badge({
   children,
   variant,
 }: {
-  children: string;
+  children: ReactNode;
   variant: "success" | "warning" | "danger";
 }) {
   const className =

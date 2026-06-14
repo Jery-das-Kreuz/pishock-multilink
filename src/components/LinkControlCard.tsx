@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 type StoredLink = {
   name: string;
@@ -16,6 +16,9 @@ type StoredLink = {
   maxDuration: number;
 
   forceLogin: boolean;
+  forceWarning?: boolean;
+  forceWarningLevel?: number;
+  disabled?: boolean;
   paused: boolean;
   remainingActivations: number;
   expiry: string | null;
@@ -37,6 +40,10 @@ type Props = {
   selected: boolean;
   onSelectedChange: (selected: boolean) => void;
   showAdvanced: boolean;
+  sessionId?: string;
+  controllerBlocked?: boolean;
+  shockCooldownRemainingSeconds?: number;
+  onShockCommandSent?: () => void;
 };
 
 type CommandMode = "s" | "v" | "e";
@@ -47,6 +54,12 @@ function randomIntensity(maxIntensity: number) {
   return Math.floor(Math.random() * (safeMax + 1));
 }
 
+function normalizeWarningLevel(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.min(3, Math.round(parsed)));
+}
+
 export function LinkControlCard({
   bundleId,
   link,
@@ -55,6 +68,10 @@ export function LinkControlCard({
   selected,
   onSelectedChange,
   showAdvanced,
+  sessionId,
+  controllerBlocked = false,
+  shockCooldownRemainingSeconds = 0,
+  onShockCommandSent,
 }: Props) {
   const vibrateMaxIntensity =
     link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity;
@@ -74,18 +91,26 @@ export function LinkControlCard({
     link.maxDurationSeconds ??
     Math.floor(link.maxDuration / 1000);
 
+  const forcedWarning = Boolean(link.forceWarning);
+  const forcedWarningLevel = normalizeWarningLevel(link.forceWarningLevel);
+  const managerDisabled = Boolean(link.disabled);
+  const shockCooldownRemaining = Math.max(
+    0,
+    Math.ceil(shockCooldownRemainingSeconds),
+  );
+
   const [vibrateIntensity, setVibrateIntensity] = useState(
-    Math.min(10, vibrateMaxIntensity)
+    Math.min(10, vibrateMaxIntensity),
   );
   const [vibrateDuration, setVibrateDuration] = useState(
-    Math.min(1, vibrateMaxDurationSeconds)
+    Math.min(1, vibrateMaxDurationSeconds),
   );
 
   const [shockIntensity, setShockIntensity] = useState(
-    Math.min(5, shockMaxIntensity)
+    Math.min(5, shockMaxIntensity),
   );
   const [shockDuration, setShockDuration] = useState(
-    Math.min(0.3, shockMaxDurationSeconds)
+    Math.min(0.3, shockMaxDurationSeconds),
   );
 
   const [shockWarning, setShockWarning] = useState(false);
@@ -94,7 +119,9 @@ export function LinkControlCard({
   const [message, setMessage] = useState<string | null>(null);
   const [loadingMode, setLoadingMode] = useState<CommandMode | null>(null);
 
-  const baseDisabled = link.paused || !username.trim();
+  const baseDisabled =
+    managerDisabled || link.paused || !username.trim() || controllerBlocked;
+  const shockDisabled = baseDisabled || shockCooldownRemaining > 0;
 
   async function sendCommand(
     mode: CommandMode,
@@ -103,7 +130,7 @@ export function LinkControlCard({
       duration?: number;
       warning?: boolean;
       warningLevel?: number;
-    }
+    },
   ) {
     setMessage(null);
     setLoadingMode(mode);
@@ -118,11 +145,12 @@ export function LinkControlCard({
           uuid: link.uuid,
           username: username.trim(),
           accessPassword,
+          sessionId,
           mode,
-          intensity: mode === "e" ? 0 : options?.intensity ?? 0,
-          duration: mode === "e" ? 0 : options?.duration ?? 0,
+          intensity: mode === "e" ? 0 : (options?.intensity ?? 0),
+          duration: mode === "e" ? 0 : (options?.duration ?? 0),
           warning: options?.warning ?? false,
-          warningLevel: options?.warning ? options.warningLevel ?? 1 : 0,
+          warningLevel: options?.warning ? (options.warningLevel ?? 1) : 0,
           hold: false,
         }),
       });
@@ -131,11 +159,15 @@ export function LinkControlCard({
 
       if (!response.ok || !result.ok) {
         throw new Error(
-          result.error || result.result?.Message || "Command failed."
+          result.error || result.result?.Message || "Command failed.",
         );
       }
 
       setMessage(result.result?.Message || "Command sent.");
+
+      if (mode === "s") {
+        onShockCommandSent?.();
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unknown error.");
     } finally {
@@ -152,7 +184,7 @@ export function LinkControlCard({
               <input
                 type="checkbox"
                 checked={selected}
-                disabled={link.paused}
+                disabled={managerDisabled || link.paused}
                 onChange={(event) => onSelectedChange(event.target.checked)}
               />
               <span>Select</span>
@@ -160,22 +192,54 @@ export function LinkControlCard({
 
             <h2 className="text-xl font-semibold">{link.name}</h2>
 
-            {link.paused ? (
+            {managerDisabled ? (
+              <Badge variant="danger">Disabled</Badge>
+            ) : link.paused ? (
               <Badge variant="danger">Paused</Badge>
             ) : (
               <Badge variant="success">Active</Badge>
             )}
 
             {link.forceLogin && <Badge variant="warning">Force Login</Badge>}
+            {forcedWarning && (
+              <Badge variant="warning">
+                Warning Duration {forcedWarningLevel}
+              </Badge>
+            )}
           </div>
 
           <p className="mt-1 text-sm text-zinc-400">
             Official name: {link.pishockName}
           </p>
 
+          {managerDisabled && (
+            <p className="mt-2 text-sm text-red-300">
+              This shocker is disabled by the bundle manager.
+            </p>
+          )}
+
           {!username.trim() && (
             <p className="mt-2 text-sm text-yellow-300">
               Enter a display name above to enable controls.
+            </p>
+          )}
+
+          {controllerBlocked && (
+            <p className="mt-2 text-sm text-red-300">
+              Your inputs are currently blocked by the bundle manager.
+            </p>
+          )}
+
+          {forcedWarning && (
+            <p className="mt-2 text-sm text-yellow-200">
+              The manager requires shock warning duration {forcedWarningLevel} for
+              this shocker.
+            </p>
+          )}
+
+          {shockCooldownRemaining > 0 && (
+            <p className="mt-2 text-sm text-yellow-300">
+              Shock is on cooldown for {shockCooldownRemaining}s.
             </p>
           )}
         </div>
@@ -208,7 +272,9 @@ export function LinkControlCard({
                     <button
                       type="button"
                       onClick={() =>
-                        setVibrateIntensity(randomIntensity(vibrateMaxIntensity))
+                        setVibrateIntensity(
+                          randomIntensity(vibrateMaxIntensity),
+                        )
                       }
                       className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
                     >
@@ -325,18 +391,26 @@ export function LinkControlCard({
                 <label className="flex items-center gap-3 text-sm">
                   <input
                     type="checkbox"
-                    checked={shockWarning}
+                    checked={forcedWarning || shockWarning}
+                    disabled={forcedWarning}
                     onChange={(event) => setShockWarning(event.target.checked)}
                   />
-                  <span>Enable warning</span>
+                  <span>
+                    {forcedWarning
+                      ? "Warning required by manager"
+                      : "Enable warning"}
+                  </span>
                 </label>
 
-                {shockWarning && (
+                {(forcedWarning || shockWarning) && (
                   <label className="mt-3 grid gap-2 text-sm">
                     <span className="text-zinc-300">Warning Duration</span>
 
                     <select
-                      value={shockWarningLevel}
+                      value={
+                        forcedWarning ? forcedWarningLevel : shockWarningLevel
+                      }
+                      disabled={forcedWarning}
                       onChange={(event) =>
                         setShockWarningLevel(Number(event.target.value))
                       }
@@ -355,11 +429,13 @@ export function LinkControlCard({
                   sendCommand("s", {
                     intensity: shockIntensity,
                     duration: shockDuration,
-                    warning: shockWarning,
-                    warningLevel: shockWarningLevel,
+                    warning: forcedWarning || shockWarning,
+                    warningLevel: forcedWarning
+                      ? forcedWarningLevel
+                      : shockWarningLevel,
                   })
                 }
-                disabled={baseDisabled || loadingMode !== null}
+                disabled={shockDisabled || loadingMode !== null}
                 className="rounded-lg bg-red-700 px-5 py-3 text-sm font-semibold hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loadingMode === "s" ? "Sending..." : "Shock"}
@@ -371,7 +447,7 @@ export function LinkControlCard({
 
       <button
         onClick={() => sendCommand("e")}
-        disabled={!username.trim() || loadingMode !== null}
+        disabled={baseDisabled || loadingMode !== null}
         className="mt-4 rounded-lg border border-zinc-700 px-5 py-3 text-sm font-semibold hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {loadingMode === "e" ? "Stopping..." : "Stop"}
@@ -379,14 +455,25 @@ export function LinkControlCard({
 
       {showAdvanced && (
         <>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <InfoBox label="Shock" value={link.shockEnabled ? "Allowed" : "Off"} />
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <InfoBox
+              label="Shock"
+              value={link.shockEnabled ? "Allowed" : "Off"}
+            />
             <InfoBox
               label="Vibrate"
               value={link.vibrateEnabled ? "Allowed" : "Off"}
             />
             <InfoBox label="Max Intensity" value={link.maxIntensity} />
             <InfoBox label="Max Duration" value={`${link.maxDuration} s`} />
+            <InfoBox
+              label="Forced warning"
+              value={forcedWarning ? `Level ${forcedWarningLevel}` : "Off"}
+            />
+            <InfoBox
+              label="Manager status"
+              value={managerDisabled ? "Disabled" : "Enabled"}
+            />
           </div>
 
           {message && (
@@ -400,13 +487,7 @@ export function LinkControlCard({
   );
 }
 
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
+function InfoBox({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
       <div className="text-xs uppercase tracking-wide text-zinc-500">
@@ -421,7 +502,7 @@ function Badge({
   children,
   variant,
 }: {
-  children: string;
+  children: ReactNode;
   variant: "success" | "warning" | "danger";
 }) {
   const className =

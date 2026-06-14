@@ -5,6 +5,11 @@ import WebSocket from "ws";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { verifyAccessPassword } from "@/lib/accessPassword";
+import {
+  getShockCooldownError,
+  markControllerShock,
+  touchControllerSession,
+} from "@/lib/controllerSessions";
 
 type StoredLink = {
   name: string;
@@ -35,6 +40,8 @@ type StoredLink = {
 
   forceLogin: boolean;
   forceWarning: boolean;
+  forceWarningLevel?: number;
+  disabled?: boolean;
   paused: boolean;
   activateOnLoad: boolean;
 
@@ -55,6 +62,7 @@ const operateSchema = z.object({
   uuid: z.string().uuid(),
   username: z.string().trim().min(1).max(32),
   accessPassword: z.string().optional().default(""),
+  sessionId: z.string().trim().min(8).max(120).optional(),
 
   mode: z.enum(["s", "v", "e"]),
 
@@ -204,6 +212,13 @@ export async function POST(
     );
   }
 
+  if (link.disabled) {
+    return NextResponse.json(
+      { error: "This shocker is disabled by the bundle manager." },
+      { status: 403 }
+    );
+  }
+
   if (link.paused) {
     return NextResponse.json({ error: "This link is paused." }, { status: 403 });
   }
@@ -262,6 +277,35 @@ export async function POST(
     .replace(/[^\w .-]/g, "")
     .slice(0, 32);
 
+  const controllerResult = command.sessionId
+    ? await touchControllerSession({
+        bundleId: id,
+        sessionId: command.sessionId,
+        username: safeUsername,
+        userAgent: request.headers.get("user-agent"),
+      })
+    : null;
+
+  const controllerPolicy = controllerResult?.policy ?? null;
+
+  if (controllerPolicy?.blocked) {
+    return NextResponse.json(
+      { error: "Your controls are blocked by the bundle manager.", controllerPolicy },
+      { status: 403 }
+    );
+  }
+
+  if (command.mode === "s" && controllerPolicy) {
+    const cooldownError = getShockCooldownError(controllerPolicy);
+
+    if (cooldownError) {
+      return NextResponse.json(
+        { error: cooldownError, controllerPolicy },
+        { status: 429 }
+      );
+    }
+  }
+
   const safeIntensity =
     command.mode === "e"
       ? 0
@@ -276,8 +320,14 @@ export async function POST(
 
   const safeDurationMs = Math.round(safeDurationSeconds * 1000);
 
-  const safeWarningLevel = command.warning
-    ? clamp(Math.round(command.warningLevel), 1, 3)
+  const warningForced = command.mode === "s" && Boolean(link.forceWarning);
+  const effectiveWarning = command.mode === "s" && (warningForced || command.warning);
+  const safeWarningLevel = effectiveWarning
+    ? clamp(
+        Math.round(warningForced ? link.forceWarningLevel ?? 1 : command.warningLevel),
+        1,
+        3
+      )
     : 0;
 
   const payload = {
@@ -288,7 +338,7 @@ export async function POST(
       Duration: safeDurationMs,
       Replace: true,
       LogData: {
-        Warning: command.warning,
+        Warning: effectiveWarning,
         Username: safeUsername,
         WarningLevel: safeWarningLevel,
         Hold: command.hold,
@@ -299,10 +349,15 @@ export async function POST(
   try {
     const result = await publishToPiShock(command.uuid, payload);
 
+    if (command.mode === "s") {
+      await markControllerShock(id, command.sessionId);
+    }
+
     return NextResponse.json({
       ok: true,
       sent: payload,
       result,
+      controllerPolicy,
     });
   } catch (error) {
     return NextResponse.json(

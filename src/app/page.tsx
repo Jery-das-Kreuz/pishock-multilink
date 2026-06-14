@@ -619,7 +619,7 @@ function Badge({
   children,
   variant,
 }: {
-  children: string;
+  children: ReactNode;
   variant: "success" | "warning" | "danger";
 }) {
   const className =
