@@ -107,6 +107,8 @@ export async function POST(request: Request) {
           forceWarning: Boolean(info.ForceWarning),
           forceWarningLevel: 1,
           disabled: false,
+          requiresSpecialPermissions: false,
+          specialPermissionsPasswordHash: null,
           paused: info.Paused,
           activateOnLoad: info.ActivateOnLoad,
 

@@ -53,6 +53,7 @@ type ManagedLink = {
   forceWarning: boolean;
   forceWarningLevel: number;
   disabled: boolean;
+  requiresSpecialPermissions: boolean;
   paused: boolean;
   activateOnLoad: boolean;
 
@@ -69,6 +70,7 @@ type BundleData = {
   created_at: string;
   expires_at: string | null;
   hasAccessPassword?: boolean;
+  hasSpecialPermissionsPassword?: boolean;
 };
 
 type ControllerSession = {
@@ -217,6 +219,7 @@ function normalizeLink(
     forceWarning: Boolean(input.forceWarning),
     forceWarningLevel: normalizeWarningLevel(input.forceWarningLevel),
     disabled: Boolean(input.disabled),
+    requiresSpecialPermissions: Boolean(input.requiresSpecialPermissions),
     paused: Boolean(input.paused),
     activateOnLoad: Boolean(input.activateOnLoad),
 
@@ -260,6 +263,7 @@ function linkFromPiShockInfo(
     forceWarning: Boolean(info.ForceWarning),
     forceWarningLevel: 1,
     disabled: false,
+    requiresSpecialPermissions: false,
     paused: info.Paused,
     activateOnLoad: info.ActivateOnLoad,
 
@@ -275,12 +279,16 @@ function buildSaveStateSnapshot(
   links: ManagedLink[],
   newAccessPassword: string,
   clearAccessPassword: boolean,
+  newSpecialPermissionsPassword: string,
+  clearSpecialPermissionsPassword: boolean,
 ): string {
   return JSON.stringify({
     title,
     disabled,
     accessPassword: newAccessPassword.trim(),
     clearAccessPassword,
+    specialPermissionsPassword: newSpecialPermissionsPassword.trim(),
+    clearSpecialPermissionsPassword,
     links: links.map((link) => ({
       name: link.name,
       uuid: link.uuid,
@@ -291,6 +299,7 @@ function buildSaveStateSnapshot(
       forceWarning: link.forceWarning,
       forceWarningLevel: link.forceWarningLevel,
       disabled: link.disabled,
+      requiresSpecialPermissions: link.requiresSpecialPermissions,
     })),
   });
 }
@@ -310,6 +319,13 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
   const [hasAccessPassword, setHasAccessPassword] = useState(false);
   const [newAccessPassword, setNewAccessPassword] = useState("");
   const [clearAccessPassword, setClearAccessPassword] = useState(false);
+
+  const [hasSpecialPermissionsPassword, setHasSpecialPermissionsPassword] =
+    useState(false);
+  const [newSpecialPermissionsPassword, setNewSpecialPermissionsPassword] =
+    useState("");
+  const [clearSpecialPermissionsPassword, setClearSpecialPermissionsPassword] =
+    useState(false);
 
   const [controllersOpen, setControllersOpen] = useState(false);
   const [controllersLoading, setControllersLoading] = useState(false);
@@ -341,8 +357,18 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         links,
         newAccessPassword,
         clearAccessPassword,
+        newSpecialPermissionsPassword,
+        clearSpecialPermissionsPassword,
       ),
-    [title, disabled, links, newAccessPassword, clearAccessPassword],
+    [
+      title,
+      disabled,
+      links,
+      newAccessPassword,
+      clearAccessPassword,
+      newSpecialPermissionsPassword,
+      clearSpecialPermissionsPassword,
+    ],
   );
 
   const hasUnsavedChanges =
@@ -390,8 +416,21 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         setHasAccessPassword(Boolean(bundle.hasAccessPassword));
         setNewAccessPassword("");
         setClearAccessPassword(false);
+        setHasSpecialPermissionsPassword(
+          Boolean(bundle.hasSpecialPermissionsPassword),
+        );
+        setNewSpecialPermissionsPassword("");
+        setClearSpecialPermissionsPassword(false);
         setSavedSnapshot(
-          buildSaveStateSnapshot(loadedTitle, loadedDisabled, loadedLinks, "", false),
+          buildSaveStateSnapshot(
+            loadedTitle,
+            loadedDisabled,
+            loadedLinks,
+            "",
+            false,
+            "",
+            false,
+          ),
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error.");
@@ -625,6 +664,29 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         throw new Error("A bundle must contain at least one shocker.");
       }
 
+      if (
+        newSpecialPermissionsPassword.trim() &&
+        newSpecialPermissionsPassword.trim().length < 8
+      ) {
+        throw new Error(
+          "The special permissions password must contain at least 8 characters.",
+        );
+      }
+
+      const protectedLinksExist = links.some(
+        (link) => link.requiresSpecialPermissions,
+      );
+      const specialPasswordWillExist =
+        !clearSpecialPermissionsPassword &&
+        (Boolean(newSpecialPermissionsPassword.trim()) ||
+          hasSpecialPermissionsPassword);
+
+      if (protectedLinksExist && !specialPasswordWillExist) {
+        throw new Error(
+          "Set a special permissions password before protecting shockers.",
+        );
+      }
+
       const response = await fetch(`/api/bundles/${bundleId}/manage`, {
         method: "PUT",
         headers: {
@@ -636,6 +698,9 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
           disabled,
           accessPassword: newAccessPassword.trim() || undefined,
           clearAccessPassword,
+          specialPermissionsPassword:
+            newSpecialPermissionsPassword.trim() || undefined,
+          clearSpecialPermissionsPassword,
           links: links.map((link) => ({
             name: link.name,
             uuid: link.uuid,
@@ -649,6 +714,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
             forceWarning: link.forceWarning,
             forceWarningLevel: link.forceWarningLevel,
             disabled: link.disabled,
+            requiresSpecialPermissions: link.requiresSpecialPermissions,
           })),
         }),
       });
@@ -665,9 +731,27 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         setHasAccessPassword(true);
       }
 
-      setSavedSnapshot(buildSaveStateSnapshot(title, disabled, links, "", false));
+      if (clearSpecialPermissionsPassword) {
+        setHasSpecialPermissionsPassword(false);
+      } else if (newSpecialPermissionsPassword.trim()) {
+        setHasSpecialPermissionsPassword(true);
+      }
+
+      setSavedSnapshot(
+        buildSaveStateSnapshot(
+          title,
+          disabled,
+          links,
+          "",
+          false,
+          "",
+          false,
+        ),
+      );
       setNewAccessPassword("");
       setClearAccessPassword(false);
+      setNewSpecialPermissionsPassword("");
+      setClearSpecialPermissionsPassword(false);
       setMessage("Changes saved successfully.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error.");
@@ -781,6 +865,62 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                   />
                   <span>Remove access password and require name only</span>
                 </label>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-purple-800 bg-zinc-950 p-4">
+              <h3 className="font-medium text-purple-200">
+                Special permissions password
+              </h3>
+
+              <p className="mt-1 text-sm text-zinc-500">
+                Current status:{" "}
+                {hasSpecialPermissionsPassword
+                  ? "Special password configured"
+                  : "No special password"}
+              </p>
+
+              <p className="mt-2 text-sm text-zinc-400">
+                This password is separate from the public page access password.
+                Shockers marked as requiring special permissions stay locked
+                until a user enters it.
+              </p>
+
+              <div className="mt-4 grid gap-4">
+                <label className="grid gap-2">
+                  <span className="text-sm text-zinc-300">
+                    New special permissions password
+                  </span>
+                  <input
+                    type="password"
+                    value={newSpecialPermissionsPassword}
+                    onChange={(event) =>
+                      setNewSpecialPermissionsPassword(event.target.value)
+                    }
+                    placeholder="Leave empty to keep current password"
+                    disabled={clearSpecialPermissionsPassword}
+                    className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </label>
+
+                <label className="flex items-center gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={clearSpecialPermissionsPassword}
+                    onChange={(event) =>
+                      setClearSpecialPermissionsPassword(event.target.checked)
+                    }
+                  />
+                  <span>Remove special permissions password</span>
+                </label>
+
+                {clearSpecialPermissionsPassword &&
+                  links.some((link) => link.requiresSpecialPermissions) && (
+                    <p className="text-sm text-yellow-200">
+                      Disable “Needs special permissions” on all shockers before
+                      removing this password.
+                    </p>
+                  )}
               </div>
             </div>
 
@@ -1021,6 +1161,9 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                     {link.forceLogin && (
                       <Badge variant="warning">Force login</Badge>
                     )}
+                    {link.requiresSpecialPermissions && (
+                      <Badge variant="warning">Special permissions</Badge>
+                    )}
                   </div>
 
                   <p className="mt-1 text-sm text-zinc-400">
@@ -1130,6 +1273,30 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                     })
                   }
                 />
+
+                <label className="flex items-start gap-3 rounded-xl border border-purple-800 bg-zinc-950 p-4">
+                  <input
+                    type="checkbox"
+                    checked={link.requiresSpecialPermissions}
+                    onChange={(event) =>
+                      updateLink(link.uuid, {
+                        requiresSpecialPermissions: event.target.checked,
+                      })
+                    }
+                    className="mt-1"
+                  />
+
+                  <div>
+                    <div className="font-medium text-purple-200">
+                      Needs special permissions
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-400">
+                      Users can see this shocker, but shock and vibrate remain
+                      locked until the separate special permissions password is
+                      entered. Stop remains available.
+                    </div>
+                  </div>
+                </label>
               </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -1152,6 +1319,10 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                       ? `Level ${link.forceWarningLevel}`
                       : "Off"
                   }
+                />
+                <InfoBox
+                  label="Special permissions"
+                  value={link.requiresSpecialPermissions ? "Required" : "Off"}
                 />
                 <InfoBox
                   label="Manager status"

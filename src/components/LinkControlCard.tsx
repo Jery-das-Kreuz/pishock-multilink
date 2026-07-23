@@ -3,33 +3,23 @@
 import { type ReactNode, useState } from "react";
 
 type StoredLink = {
+  id: string;
   name: string;
-  uuid: string;
-  url: string;
 
-  pishockName: string;
   shockEnabled: boolean;
   vibrateEnabled: boolean;
-  beepEnabled: boolean;
 
-  maxIntensity: number;
-  maxDuration: number;
+  vibrateIntensityLimit: number;
+  vibrateDurationLimitSeconds: number;
+  shockIntensityLimit: number;
+  shockDurationLimitSeconds: number;
 
   forceLogin: boolean;
   forceWarning?: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  requiresSpecialPermissions?: boolean;
   paused: boolean;
-  remainingActivations: number;
-  expiry: string | null;
-
-  vibrateIntensityLimit?: number;
-  vibrateDurationLimitSeconds?: number;
-  shockIntensityLimit?: number;
-  shockDurationLimitSeconds?: number;
-  intensityLimit?: number;
-  durationLimitSeconds?: number;
-  maxDurationSeconds?: number;
 };
 
 type Props = {
@@ -37,6 +27,8 @@ type Props = {
   link: StoredLink;
   username: string;
   accessPassword: string;
+  specialPermissionsPassword: string;
+  specialPermissionsGranted: boolean;
   selected: boolean;
   onSelectedChange: (selected: boolean) => void;
   showAdvanced: boolean;
@@ -44,6 +36,7 @@ type Props = {
   controllerBlocked?: boolean;
   shockCooldownRemainingSeconds?: number;
   onShockCommandSent?: () => void;
+  onSpecialPermissionsRejected?: () => void;
 };
 
 type CommandMode = "s" | "v" | "e";
@@ -65,6 +58,8 @@ export function LinkControlCard({
   link,
   username,
   accessPassword,
+  specialPermissionsPassword,
+  specialPermissionsGranted,
   selected,
   onSelectedChange,
   showAdvanced,
@@ -72,28 +67,18 @@ export function LinkControlCard({
   controllerBlocked = false,
   shockCooldownRemainingSeconds = 0,
   onShockCommandSent,
+  onSpecialPermissionsRejected,
 }: Props) {
-  const vibrateMaxIntensity =
-    link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity;
-
-  const vibrateMaxDurationSeconds =
-    link.vibrateDurationLimitSeconds ??
-    link.durationLimitSeconds ??
-    link.maxDurationSeconds ??
-    Math.floor(link.maxDuration / 1000);
-
-  const shockMaxIntensity =
-    link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity;
-
-  const shockMaxDurationSeconds =
-    link.shockDurationLimitSeconds ??
-    link.durationLimitSeconds ??
-    link.maxDurationSeconds ??
-    Math.floor(link.maxDuration / 1000);
+  const vibrateMaxIntensity = link.vibrateIntensityLimit;
+  const vibrateMaxDurationSeconds = link.vibrateDurationLimitSeconds;
+  const shockMaxIntensity = link.shockIntensityLimit;
+  const shockMaxDurationSeconds = link.shockDurationLimitSeconds;
 
   const forcedWarning = Boolean(link.forceWarning);
   const forcedWarningLevel = normalizeWarningLevel(link.forceWarningLevel);
   const managerDisabled = Boolean(link.disabled);
+  const specialPermissionLocked =
+    Boolean(link.requiresSpecialPermissions) && !specialPermissionsGranted;
   const shockCooldownRemaining = Math.max(
     0,
     Math.ceil(shockCooldownRemainingSeconds),
@@ -121,7 +106,9 @@ export function LinkControlCard({
 
   const baseDisabled =
     managerDisabled || link.paused || !username.trim() || controllerBlocked;
-  const shockDisabled = baseDisabled || shockCooldownRemaining > 0;
+  const protectedControlDisabled = baseDisabled || specialPermissionLocked;
+  const shockDisabled =
+    protectedControlDisabled || shockCooldownRemaining > 0;
 
   async function sendCommand(
     mode: CommandMode,
@@ -142,9 +129,10 @@ export function LinkControlCard({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          uuid: link.uuid,
+          linkId: link.id,
           username: username.trim(),
           accessPassword,
+          specialPermissionsPassword,
           sessionId,
           mode,
           intensity: mode === "e" ? 0 : (options?.intensity ?? 0),
@@ -157,13 +145,15 @@ export function LinkControlCard({
 
       const result = await response.json();
 
-      if (!response.ok || !result.ok) {
-        throw new Error(
-          result.error || result.result?.Message || "Command failed.",
-        );
+      if (result.specialPermissionsRequired) {
+        onSpecialPermissionsRejected?.();
       }
 
-      setMessage(result.result?.Message || "Command sent.");
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Command failed.");
+      }
+
+      setMessage(result.message || "Command sent.");
 
       if (mode === "s") {
         onShockCommandSent?.();
@@ -184,7 +174,9 @@ export function LinkControlCard({
               <input
                 type="checkbox"
                 checked={selected}
-                disabled={managerDisabled || link.paused}
+                disabled={
+                  managerDisabled || link.paused || specialPermissionLocked
+                }
                 onChange={(event) => onSelectedChange(event.target.checked)}
               />
               <span>Select</span>
@@ -200,7 +192,16 @@ export function LinkControlCard({
               <Badge variant="success">Active</Badge>
             )}
 
-            {link.forceLogin && <Badge variant="warning">Force Login</Badge>}
+            {link.forceLogin && <Badge variant="warning">Login required</Badge>}
+            {link.requiresSpecialPermissions && (
+              <Badge
+                variant={specialPermissionsGranted ? "success" : "warning"}
+              >
+                {specialPermissionsGranted
+                  ? "Special access unlocked"
+                  : "Special permissions required"}
+              </Badge>
+            )}
             {forcedWarning && (
               <Badge variant="warning">
                 Warning Duration {forcedWarningLevel}
@@ -208,9 +209,6 @@ export function LinkControlCard({
             )}
           </div>
 
-          <p className="mt-1 text-sm text-zinc-400">
-            Official name: {link.pishockName}
-          </p>
 
           {managerDisabled && (
             <p className="mt-2 text-sm text-red-300">
@@ -230,6 +228,13 @@ export function LinkControlCard({
             </p>
           )}
 
+          {specialPermissionLocked && (
+            <p className="mt-2 text-sm text-purple-200">
+              Enter the special permissions password above to unlock this
+              shocker. The Stop command remains available.
+            </p>
+          )}
+
           {forcedWarning && (
             <p className="mt-2 text-sm text-yellow-200">
               The manager requires shock warning duration {forcedWarningLevel} for
@@ -244,14 +249,6 @@ export function LinkControlCard({
           )}
         </div>
 
-        <a
-          href={link.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-lg border border-zinc-700 px-4 py-2 text-center text-sm font-medium hover:bg-zinc-800"
-        >
-          Official page
-        </a>
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
@@ -322,7 +319,7 @@ export function LinkControlCard({
                     warningLevel: 0,
                   })
                 }
-                disabled={baseDisabled || loadingMode !== null}
+                disabled={protectedControlDisabled || loadingMode !== null}
                 className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loadingMode === "v" ? "Sending..." : "Vibrate"}
@@ -464,11 +461,27 @@ export function LinkControlCard({
               label="Vibrate"
               value={link.vibrateEnabled ? "Allowed" : "Off"}
             />
-            <InfoBox label="Max Intensity" value={link.maxIntensity} />
-            <InfoBox label="Max Duration" value={`${link.maxDuration} s`} />
+            <InfoBox
+              label="Shock limit"
+              value={`${shockMaxIntensity} / ${shockMaxDurationSeconds}s`}
+            />
+            <InfoBox
+              label="Vibrate limit"
+              value={`${vibrateMaxIntensity} / ${vibrateMaxDurationSeconds}s`}
+            />
             <InfoBox
               label="Forced warning"
               value={forcedWarning ? `Level ${forcedWarningLevel}` : "Off"}
+            />
+            <InfoBox
+              label="Special permissions"
+              value={
+                link.requiresSpecialPermissions
+                  ? specialPermissionsGranted
+                    ? "Unlocked"
+                    : "Required"
+                  : "Not required"
+              }
             />
             <InfoBox
               label="Manager status"

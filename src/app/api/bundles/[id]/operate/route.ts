@@ -1,82 +1,74 @@
 export const runtime = "nodejs";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import WebSocket from "ws";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { verifyAccessPassword } from "@/lib/accessPassword";
+import { createPublicLinkId } from "@/lib/publicBundleLinks";
 import {
   getShockCooldownError,
   markControllerShock,
   touchControllerSession,
 } from "@/lib/controllerSessions";
+import {
+  attachControllerCookie,
+  resolveControllerId,
+} from "@/lib/controllerIdentity";
+import {
+  getSpecialPermissionsPasswordHash,
+  verifySpecialPermissionsPassword,
+} from "@/lib/specialPermissions";
 
 type StoredLink = {
   name: string;
   uuid: string;
   url: string;
-
   pishockName: string;
   linkId: number;
   ownerId: number;
-
   shockEnabled: boolean;
   vibrateEnabled: boolean;
   beepEnabled: boolean;
-
   maxIntensity: number;
   maxDuration: number;
   maxDurationSeconds?: number;
-
   vibrateIntensityLimit?: number;
   vibrateDurationLimitSeconds?: number;
-
   shockIntensityLimit?: number;
   shockDurationLimitSeconds?: number;
-
-  // Legacy fallback fields for old bundles.
   intensityLimit?: number;
   durationLimitSeconds?: number;
-
   forceLogin: boolean;
   forceWarning: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  requiresSpecialPermissions?: boolean;
+  specialPermissionsPasswordHash?: string | null;
   paused: boolean;
   activateOnLoad: boolean;
-
   remainingActivations: number;
   expiry: string | null;
   lastCheckedAt: string;
 };
 
 const numberFromJson = z.preprocess((value) => {
-  if (typeof value === "string" && value.trim() !== "") {
-    return Number(value);
-  }
-
+  if (typeof value === "string" && value.trim() !== "") return Number(value);
   return value;
 }, z.number());
 
 const operateSchema = z.object({
-  uuid: z.string().uuid(),
+  linkId: z.string().trim().min(16).max(128),
   username: z.string().trim().min(1).max(32),
   accessPassword: z.string().optional().default(""),
+  specialPermissionsPassword: z.string().optional().default(""),
   sessionId: z.string().trim().min(8).max(120).optional(),
-
   mode: z.enum(["s", "v", "e"]),
-
   intensity: numberFromJson.optional().default(0),
-
-  // New field: seconds.
   durationSeconds: numberFromJson.optional(),
-
-  // Legacy field: sometimes milliseconds, sometimes seconds depending on old UI.
   duration: numberFromJson.optional(),
-
   warning: z.boolean().optional().default(false),
   warningLevel: numberFromJson.optional().default(0),
-
   hold: z.boolean().optional().default(false),
 });
 
@@ -89,88 +81,60 @@ function getRequestedDurationSeconds(command: {
   durationSeconds?: number;
   duration?: number;
 }): number {
-  if (typeof command.durationSeconds === "number") {
-    return command.durationSeconds;
-  }
-
+  if (typeof command.durationSeconds === "number") return command.durationSeconds;
   if (typeof command.duration === "number") {
-    // Legacy compatibility:
-    // values above 60 are almost certainly milliseconds from the old UI.
-    if (command.duration > 60) {
-      return command.duration / 1000;
-    }
-
-    // Small values are treated as seconds.
-    return command.duration;
+    return command.duration > 60 ? command.duration / 1000 : command.duration;
   }
-
   return 0;
 }
 
 function publishToPiShock(uuid: string, payload: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`wss://broker.pishock.com/Links/${uuid}`);
-
     const timeout = setTimeout(() => {
       ws.close();
       reject(new Error("PiShock WebSocket timeout."));
     }, 8000);
 
-    ws.on("open", () => {
-      ws.send(JSON.stringify(payload));
-    });
-
+    ws.on("open", () => ws.send(JSON.stringify(payload)));
     ws.on("message", (data) => {
       clearTimeout(timeout);
-
       const text = data.toString();
-
       try {
-        const parsed = JSON.parse(text);
-        ws.close();
-        resolve(parsed);
+        resolve(JSON.parse(text));
       } catch {
-        ws.close();
         resolve({ raw: text });
+      } finally {
+        ws.close();
       }
     });
-
     ws.on("error", (error) => {
       clearTimeout(timeout);
       reject(error);
     });
-
-    ws.on("close", () => {
-      clearTimeout(timeout);
-    });
+    ws.on("close", () => clearTimeout(timeout));
   });
 }
 
 export async function POST(
-  request: Request,
-  context: { params: Promise<{ id: string }> }
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
-
   const body = await request.json().catch(() => null);
   const parsed = operateSchema.safeParse(body);
 
   if (!parsed.success) {
-    console.error("Operate validation error:", {
-      body,
-      details: parsed.error.flatten(),
-    });
-
     return NextResponse.json(
-      {
-        error: "Invalid operate request.",
-        details: parsed.error.flatten(),
-      },
-      { status: 400 }
+      { error: "Invalid operate request.", details: parsed.error.flatten() },
+      { status: 400 },
     );
   }
 
   const command = parsed.data;
+  const controllerId = resolveControllerId(request, id, command.sessionId);
+  const respond = (payload: Record<string, unknown>, init?: ResponseInit) =>
+    attachControllerCookie(NextResponse.json(payload, init), id, controllerId);
 
   const { data: bundle, error } = await supabaseAdmin
     .from("bundles")
@@ -179,129 +143,130 @@ export async function POST(
     .single();
 
   if (error || !bundle) {
-    return NextResponse.json({ error: "Bundle not found." }, { status: 404 });
+    return respond({ error: "Bundle not found." }, { status: 404 });
   }
 
   if (bundle.disabled) {
-    return NextResponse.json(
-      { error: "Bundle is offline." },
-      { status: 410 }
-    );
+    return respond({ error: "Bundle is offline." }, { status: 410 });
   }
 
   if (
     bundle.access_password_hash &&
     !verifyAccessPassword(command.accessPassword, bundle.access_password_hash)
   ) {
-    return NextResponse.json(
-      { error: "Invalid access password." },
-      { status: 403 }
-    );
+    return respond({ error: "Invalid access password." }, { status: 403 });
   }
 
   const links = bundle.links as StoredLink[];
-
   const link = links.find(
-    (item) => item.uuid.toLowerCase() === command.uuid.toLowerCase()
+    (item) => createPublicLinkId(id, item.uuid) === command.linkId,
   );
 
   if (!link) {
-    return NextResponse.json(
-      { error: "This PiShock link is not part of this bundle." },
-      { status: 403 }
+    return respond(
+      { error: "This device is not part of this bundle." },
+      { status: 403 },
     );
   }
 
   if (link.disabled) {
-    return NextResponse.json(
+    return respond(
       { error: "This shocker is disabled by the bundle manager." },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
   if (link.paused) {
-    return NextResponse.json({ error: "This link is paused." }, { status: 403 });
+    return respond({ error: "This link is paused." }, { status: 403 });
   }
 
+  if (
+    command.mode !== "e" &&
+    link.requiresSpecialPermissions &&
+    !verifySpecialPermissionsPassword(command.specialPermissionsPassword, links)
+  ) {
+    const configured = Boolean(getSpecialPermissionsPasswordHash(links));
+    return respond(
+      {
+        error: configured
+          ? "Special permissions password required for this shocker."
+          : "Special permissions are not configured correctly.",
+        specialPermissionsRequired: true,
+      },
+      { status: 403 },
+    );
+  }
 
   if (command.mode === "s" && !link.shockEnabled) {
-    return NextResponse.json(
+    return respond(
       { error: "Shock is not enabled for this link." },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
   if (command.mode === "v" && !link.vibrateEnabled) {
-    return NextResponse.json(
+    return respond(
       { error: "Vibrate is not enabled for this link." },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
   const maxDurationSeconds =
     link.maxDurationSeconds ?? Math.max(0.1, Math.floor(link.maxDuration / 1000));
-
   const effectiveMaxIntensity =
     command.mode === "s"
       ? Math.min(
           link.maxIntensity,
-          link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity
+          link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity,
         )
       : command.mode === "v"
         ? Math.min(
             link.maxIntensity,
-            link.vibrateIntensityLimit ??
-              link.intensityLimit ??
-              link.maxIntensity
+            link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity,
           )
         : 0;
-
   const effectiveMaxDurationSeconds =
     command.mode === "s"
       ? Math.min(
           maxDurationSeconds,
           link.shockDurationLimitSeconds ??
             link.durationLimitSeconds ??
-            maxDurationSeconds
+            maxDurationSeconds,
         )
       : command.mode === "v"
         ? Math.min(
             maxDurationSeconds,
             link.vibrateDurationLimitSeconds ??
               link.durationLimitSeconds ??
-              maxDurationSeconds
+              maxDurationSeconds,
           )
         : 0;
 
-  const safeUsername = command.username
-    .replace(/[^\w .-]/g, "")
-    .slice(0, 32);
-
-  const controllerResult = command.sessionId
-    ? await touchControllerSession({
-        bundleId: id,
-        sessionId: command.sessionId,
-        username: safeUsername,
-        userAgent: request.headers.get("user-agent"),
-      })
-    : null;
-
-  const controllerPolicy = controllerResult?.policy ?? null;
+  const safeUsername = command.username.replace(/[^\w .-]/g, "").slice(0, 32);
+  const controllerResult = await touchControllerSession({
+    bundleId: id,
+    sessionId: controllerId,
+    username: safeUsername,
+    userAgent: request.headers.get("user-agent"),
+  });
+  const controllerPolicy = controllerResult.policy;
 
   if (controllerPolicy?.blocked) {
-    return NextResponse.json(
-      { error: "Your controls are blocked by the bundle manager.", controllerPolicy },
-      { status: 403 }
+    return respond(
+      {
+        error: "Your controls are blocked by the bundle manager.",
+        controllerPolicy,
+      },
+      { status: 403 },
     );
   }
 
   if (command.mode === "s" && controllerPolicy) {
     const cooldownError = getShockCooldownError(controllerPolicy);
-
     if (cooldownError) {
-      return NextResponse.json(
+      return respond(
         { error: cooldownError, controllerPolicy },
-        { status: 429 }
+        { status: 429 },
       );
     }
   }
@@ -310,23 +275,24 @@ export async function POST(
     command.mode === "e"
       ? 0
       : clamp(Math.round(command.intensity), 0, effectiveMaxIntensity);
-
-  const requestedDurationSeconds = getRequestedDurationSeconds(command);
-
   const safeDurationSeconds =
     command.mode === "e"
       ? 0
-      : clamp(requestedDurationSeconds, 0, effectiveMaxDurationSeconds);
-
-  const safeDurationMs = Math.round(safeDurationSeconds * 1000);
-
+      : clamp(
+          getRequestedDurationSeconds(command),
+          0,
+          effectiveMaxDurationSeconds,
+        );
   const warningForced = command.mode === "s" && Boolean(link.forceWarning);
-  const effectiveWarning = command.mode === "s" && (warningForced || command.warning);
+  const effectiveWarning =
+    command.mode === "s" && (warningForced || command.warning);
   const safeWarningLevel = effectiveWarning
     ? clamp(
-        Math.round(warningForced ? link.forceWarningLevel ?? 1 : command.warningLevel),
+        Math.round(
+          warningForced ? link.forceWarningLevel ?? 1 : command.warningLevel,
+        ),
         1,
-        3
+        3,
       )
     : 0;
 
@@ -335,7 +301,7 @@ export async function POST(
     LinkCommand: {
       Mode: command.mode,
       Intensity: safeIntensity,
-      Duration: safeDurationMs,
+      Duration: Math.round(safeDurationSeconds * 1000),
       Replace: true,
       LogData: {
         Warning: effectiveWarning,
@@ -347,27 +313,25 @@ export async function POST(
   };
 
   try {
-    const result = await publishToPiShock(command.uuid, payload);
-
+    const result = await publishToPiShock(link.uuid, payload);
     if (command.mode === "s") {
-      await markControllerShock(id, command.sessionId);
+      await markControllerShock(id, controllerId);
     }
 
-    return NextResponse.json({
-      ok: true,
-      sent: payload,
-      result,
-      controllerPolicy,
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not publish command.",
-      },
-      { status: 502 }
+    const message =
+      result &&
+      typeof result === "object" &&
+      "Message" in result &&
+      typeof (result as { Message?: unknown }).Message === "string"
+        ? (result as { Message: string }).Message
+        : "Command sent.";
+
+    return respond({ ok: true, message, controllerPolicy });
+  } catch (publishError) {
+    console.error("Operate publish error:", publishError);
+    return respond(
+      { error: "Could not publish command." },
+      { status: 502 },
     );
   }
 }

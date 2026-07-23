@@ -2,36 +2,11 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { BundleControlPanel } from "@/components/BundleControlPanel";
+import { toPublicBundleLink } from "@/lib/publicBundleLinks";
 
 export const dynamic = "force-dynamic";
 
-type StoredLink = {
-  name: string;
-  uuid: string;
-  url: string;
-
-  pishockName: string;
-  linkId: number;
-  ownerId: number;
-
-  shockEnabled: boolean;
-  vibrateEnabled: boolean;
-  beepEnabled: boolean;
-
-  maxIntensity: number;
-  maxDuration: number;
-
-  forceLogin: boolean;
-  forceWarning: boolean;
-  forceWarningLevel?: number;
-  disabled?: boolean;
-  paused: boolean;
-  activateOnLoad: boolean;
-
-  remainingActivations: number;
-  expiry: string | null;
-  lastCheckedAt: string;
-};
+type StoredLink = Parameters<typeof toPublicBundleLink>[1];
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -48,7 +23,7 @@ export async function generateMetadata({
     .eq("id", id)
     .single();
 
-  const title = String(data?.title ?? "PiShock Bundle").trim() || "PiShock Bundle";
+  const title = String(data?.title ?? "Control Bundle").trim() || "Control Bundle";
 
   return {
     title: `${title} Control`,
@@ -68,7 +43,9 @@ export default async function BundlePage({ params }: PageProps) {
     notFound();
   }
 
-  const links = data.links as StoredLink[];
+  const links = (data.links as StoredLink[]).map((link) =>
+    toPublicBundleLink(data.id, link),
+  );
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -77,7 +54,8 @@ export default async function BundlePage({ params }: PageProps) {
           <h1 className="text-3xl font-bold">{data.title}</h1>
 
           <p className="mt-3 text-sm text-zinc-400">
-            This page bundles multiple PiShock LinkControl links and lets you control them from one interface.
+            Control the configured devices from one protected interface. All
+            limits set by the bundle manager are enforced by the server.
           </p>
         </header>
 
@@ -88,7 +66,6 @@ export default async function BundlePage({ params }: PageProps) {
               <p className="mt-1 text-cyan-100/80">
                 OVR Toolkit users can subscribe to the PiShock Wrist Module on Steam Workshop to control
                 these shockers directly through the OVR Toolkit wristwatch while in-game.
-                
               </p>
               <p className="mt-2 text-cyan-100/80">
                 Just follow the instructions in the workshop description to set it up!

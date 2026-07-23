@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { toPublicBundleLink } from "@/lib/publicBundleLinks";
+import { hasSpecialPermissionsPassword } from "@/lib/specialPermissions";
+
+type StoredLink = Parameters<typeof toPublicBundleLink>[1];
 
 export async function GET(
   _request: Request,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
 
@@ -17,10 +21,18 @@ export async function GET(
     return NextResponse.json({ error: "Bundle not found." }, { status: 404 });
   }
 
-  const { access_password_hash: accessPasswordHash, ...publicBundle } = data;
-
   return NextResponse.json({
-    ...publicBundle,
-    hasAccessPassword: Boolean(accessPasswordHash),
+    id: data.id,
+    title: data.title,
+    links: (data.links as StoredLink[]).map((link) =>
+      toPublicBundleLink(data.id, link),
+    ),
+    created_at: data.created_at,
+    expires_at: data.expires_at,
+    disabled: Boolean(data.disabled),
+    hasAccessPassword: Boolean(data.access_password_hash),
+    hasSpecialPermissionsPassword: hasSpecialPermissionsPassword(
+      data.links as StoredLink[],
+    ),
   });
 }

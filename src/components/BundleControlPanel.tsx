@@ -4,33 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import { LinkControlCard } from "@/components/LinkControlCard";
 
 type StoredLink = {
+  id: string;
   name: string;
-  uuid: string;
-  url: string;
 
-  pishockName: string;
   shockEnabled: boolean;
   vibrateEnabled: boolean;
-  beepEnabled: boolean;
 
-  maxIntensity: number;
-  maxDuration: number;
+  vibrateIntensityLimit: number;
+  vibrateDurationLimitSeconds: number;
+  shockIntensityLimit: number;
+  shockDurationLimitSeconds: number;
 
   forceLogin: boolean;
   forceWarning?: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  requiresSpecialPermissions?: boolean;
   paused: boolean;
-  remainingActivations: number;
-  expiry: string | null;
-
-  vibrateIntensityLimit?: number;
-  vibrateDurationLimitSeconds?: number;
-  shockIntensityLimit?: number;
-  shockDurationLimitSeconds?: number;
-  intensityLimit?: number;
-  durationLimitSeconds?: number;
-  maxDurationSeconds?: number;
 };
 
 type Props = {
@@ -90,8 +80,17 @@ export function BundleControlPanel({
   const [accessPassword, setAccessPassword] = useState("");
   const [accessGranted, setAccessGranted] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [specialPermissionsPassword, setSpecialPermissionsPassword] =
+    useState("");
+  const [specialPermissionsGranted, setSpecialPermissionsGranted] =
+    useState(false);
+  const [specialPermissionsError, setSpecialPermissionsError] = useState<
+    string | null
+  >(null);
+  const [checkingSpecialPermissions, setCheckingSpecialPermissions] =
+    useState(false);
   const [checkingAccess, setCheckingAccess] = useState(false);
-  const [selectedUuids, setSelectedUuids] = useState<string[]>([]);
+  const [selectedLinkIds, setSelectedLinkIds] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [sessionId, setSessionId] = useState("");
   const [controllerPolicy, setControllerPolicy] =
@@ -115,14 +114,25 @@ export function BundleControlPanel({
   useEffect(() => {
     const cleanTitle = bundleTitle.trim();
 
-    document.title = cleanTitle
-      ? `${cleanTitle} Control | PiShock Bundle Links`
-      : "PiShock Bundle Control | PiShock Bundle Links";
+    document.title = cleanTitle ? `${cleanTitle} Control` : "Bundle Control";
   }, [bundleTitle]);
 
   useEffect(() => {
-    setSessionId(createLocalSessionId());
-  }, []);
+    const storageKey = `pishock-controller-id:${bundleId}`;
+
+    try {
+      const existing = window.localStorage.getItem(storageKey);
+      const controllerId =
+        existing && existing.length >= 8 && existing.length <= 120
+          ? existing
+          : createLocalSessionId();
+
+      window.localStorage.setItem(storageKey, controllerId);
+      setSessionId(controllerId);
+    } catch {
+      setSessionId(createLocalSessionId());
+    }
+  }, [bundleId]);
 
   useEffect(() => {
     const intervalId = window.setInterval(
@@ -274,29 +284,96 @@ export function BundleControlPanel({
     }
   }
 
-  const selectableLinks = useMemo(() => {
-    return links.filter((link) => !link.paused && !link.disabled);
-  }, [links]);
+  async function unlockSpecialPermissions() {
+    setSpecialPermissionsError(null);
+    setCheckingSpecialPermissions(true);
+
+    try {
+      if (!specialPermissionsPassword.trim()) {
+        throw new Error("Please enter the special permissions password.");
+      }
+
+      const response = await fetch(
+        `/api/bundles/${bundleId}/special-access`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            password: specialPermissionsPassword,
+          }),
+        },
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.ok) {
+        throw new Error(
+          result.error || "Could not grant special permissions.",
+        );
+      }
+
+      setSpecialPermissionsGranted(true);
+    } catch (error) {
+      setSpecialPermissionsGranted(false);
+      setSpecialPermissionsError(
+        error instanceof Error ? error.message : "Unknown error.",
+      );
+    } finally {
+      setCheckingSpecialPermissions(false);
+    }
+  }
+
+  const specialPermissionsRequired = useMemo(
+    () => links.some((link) => Boolean(link.requiresSpecialPermissions)),
+    [links],
+  );
 
   useEffect(() => {
-    setSelectedUuids((current) => {
-      const selectableUuids = new Set(
+    if (!specialPermissionsRequired) {
+      setSpecialPermissionsGranted(false);
+      setSpecialPermissionsPassword("");
+      setSpecialPermissionsError(null);
+    }
+  }, [specialPermissionsRequired]);
+
+  const selectableLinks = useMemo(() => {
+    return links.filter(
+      (link) =>
+        !link.paused &&
+        !link.disabled &&
+        (!link.requiresSpecialPermissions || specialPermissionsGranted),
+    );
+  }, [links, specialPermissionsGranted]);
+
+  useEffect(() => {
+    setSelectedLinkIds((current) => {
+      const selectableLinkIds = new Set(
         links
-          .filter((link) => !link.paused && !link.disabled)
-          .map((link) => link.uuid),
+          .filter(
+            (link) =>
+              !link.paused &&
+              !link.disabled &&
+              (!link.requiresSpecialPermissions || specialPermissionsGranted),
+          )
+          .map((link) => link.id),
       );
-      const next = current.filter((uuid) => selectableUuids.has(uuid));
+      const next = current.filter((linkId) => selectableLinkIds.has(linkId));
 
       return next.length === current.length ? current : next;
     });
-  }, [links]);
+  }, [links, specialPermissionsGranted]);
 
   const selectedLinks = useMemo(() => {
     return links.filter(
       (link) =>
-        selectedUuids.includes(link.uuid) && !link.paused && !link.disabled,
+        selectedLinkIds.includes(link.id) &&
+        !link.paused &&
+        !link.disabled &&
+        (!link.requiresSpecialPermissions || specialPermissionsGranted),
     );
-  }, [links, selectedUuids]);
+  }, [links, selectedLinkIds, specialPermissionsGranted]);
 
   const selectedCount = selectedLinks.length;
   const controllerBlocked = Boolean(controllerPolicy?.blocked);
@@ -309,57 +386,47 @@ export function BundleControlPanel({
   const selectedVibrateMaxIntensity = Math.max(
     0,
     ...selectedLinks.map(
-      (link) =>
-        link.vibrateIntensityLimit ?? link.intensityLimit ?? link.maxIntensity,
+      (link) => link.vibrateIntensityLimit,
     ),
   );
 
   const selectedVibrateMaxDurationSeconds = Math.max(
     0.1,
     ...selectedLinks.map(
-      (link) =>
-        link.vibrateDurationLimitSeconds ??
-        link.durationLimitSeconds ??
-        link.maxDurationSeconds ??
-        Math.floor(link.maxDuration / 1000),
+      (link) => link.vibrateDurationLimitSeconds,
     ),
   );
 
   const selectedShockMaxIntensity = Math.max(
     0,
     ...selectedLinks.map(
-      (link) =>
-        link.shockIntensityLimit ?? link.intensityLimit ?? link.maxIntensity,
+      (link) => link.shockIntensityLimit,
     ),
   );
 
   const selectedShockMaxDurationSeconds = Math.max(
     0.1,
     ...selectedLinks.map(
-      (link) =>
-        link.shockDurationLimitSeconds ??
-        link.durationLimitSeconds ??
-        link.maxDurationSeconds ??
-        Math.floor(link.maxDuration / 1000),
+      (link) => link.shockDurationLimitSeconds,
     ),
   );
 
-  function toggleSelected(uuid: string, selected: boolean) {
-    setSelectedUuids((current) => {
+  function toggleSelected(linkId: string, selected: boolean) {
+    setSelectedLinkIds((current) => {
       if (selected) {
-        return current.includes(uuid) ? current : [...current, uuid];
+        return current.includes(linkId) ? current : [...current, linkId];
       }
 
-      return current.filter((item) => item !== uuid);
+      return current.filter((item) => item !== linkId);
     });
   }
 
   function selectAll() {
-    setSelectedUuids(selectableLinks.map((link) => link.uuid));
+    setSelectedLinkIds(selectableLinks.map((link) => link.id));
   }
 
   function clearSelection() {
-    setSelectedUuids([]);
+    setSelectedLinkIds([]);
   }
 
   function noteShockSent() {
@@ -423,9 +490,10 @@ export function BundleControlPanel({
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              uuid: link.uuid,
+              linkId: link.id,
               username: username.trim(),
               accessPassword,
+              specialPermissionsPassword,
               sessionId,
               mode,
               intensity: mode === "e" ? 0 : (options?.intensity ?? 0),
@@ -455,6 +523,15 @@ export function BundleControlPanel({
       );
 
       const failed = results.filter((item) => !item.ok);
+
+      if (
+        failed.some((item) => Boolean(item.result?.specialPermissionsRequired))
+      ) {
+        setSpecialPermissionsGranted(false);
+        setSpecialPermissionsError(
+          "The special permissions password is missing or no longer valid.",
+        );
+      }
 
       if (failed.length > 0) {
         setGroupMessage(
@@ -487,7 +564,7 @@ export function BundleControlPanel({
             <h2 className="text-2xl font-bold">Enter control page</h2>
 
             <p className="mt-3 text-sm text-zinc-400">
-              Choose a display name for the PiShock log.
+              Choose a display name for the activity log.
               {requiresPassword
                 ? " This bundle also requires an access password."
                 : ""}
@@ -571,6 +648,62 @@ export function BundleControlPanel({
           </div>
         )}
       </section>
+
+
+      {accessGranted && specialPermissionsRequired && (
+        <section className="mt-6 rounded-2xl border border-purple-800 bg-zinc-900 p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-purple-200">
+                Special permissions
+              </h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Some shockers require a separate password. This is independent
+                from the page access password.
+              </p>
+            </div>
+
+            {specialPermissionsGranted && (
+              <span className="rounded-full border border-green-800 bg-green-950 px-3 py-1.5 text-xs font-medium text-green-200">
+                Special shockers unlocked
+              </span>
+            )}
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+            <input
+              type="password"
+              value={specialPermissionsPassword}
+              onChange={(event) => {
+                setSpecialPermissionsPassword(event.target.value);
+                setSpecialPermissionsGranted(false);
+                setSpecialPermissionsError(null);
+              }}
+              placeholder="Special permissions password"
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-purple-500"
+            />
+
+            <button
+              type="button"
+              onClick={unlockSpecialPermissions}
+              disabled={checkingSpecialPermissions}
+              className="rounded-lg bg-purple-700 px-5 py-3 text-sm font-semibold hover:bg-purple-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {checkingSpecialPermissions
+                ? "Checking..."
+                : specialPermissionsGranted
+                  ? "Unlocked"
+                  : "Unlock special shockers"}
+            </button>
+          </div>
+
+          {specialPermissionsError && (
+            <div className="mt-4 rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-100">
+              {specialPermissionsError}
+            </div>
+          )}
+        </section>
+      )}
 
       {selectedCount > 1 && (
         <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
@@ -788,18 +921,26 @@ export function BundleControlPanel({
       <section className="mt-6 grid gap-4">
         {links.map((link) => (
           <LinkControlCard
-            key={link.uuid}
+            key={link.id}
             bundleId={bundleId}
             link={link}
             username={username}
             accessPassword={accessPassword}
-            selected={selectedUuids.includes(link.uuid)}
-            onSelectedChange={(selected) => toggleSelected(link.uuid, selected)}
+            specialPermissionsPassword={specialPermissionsPassword}
+            specialPermissionsGranted={specialPermissionsGranted}
+            selected={selectedLinkIds.includes(link.id)}
+            onSelectedChange={(selected) => toggleSelected(link.id, selected)}
             showAdvanced={showAdvanced}
             sessionId={sessionId}
             controllerBlocked={controllerBlocked}
             shockCooldownRemainingSeconds={shockCooldownRemaining}
             onShockCommandSent={noteShockSent}
+            onSpecialPermissionsRejected={() => {
+              setSpecialPermissionsGranted(false);
+              setSpecialPermissionsError(
+                "The special permissions password is missing or no longer valid.",
+              );
+            }}
           />
         ))}
       </section>

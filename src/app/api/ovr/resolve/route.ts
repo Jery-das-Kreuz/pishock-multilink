@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { verifyAccessPassword } from "@/lib/accessPassword";
+import { createPublicLinkId } from "@/lib/publicBundleLinks";
+import { verifySpecialPermissionsPassword } from "@/lib/specialPermissions";
 
 type StoredLink = {
   name: string;
@@ -31,6 +33,8 @@ type StoredLink = {
   forceWarning?: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  requiresSpecialPermissions?: boolean;
+  specialPermissionsPasswordHash?: string | null;
   paused: boolean;
 };
 
@@ -38,6 +42,7 @@ const resolveSchema = z.object({
   bundleLink: z.string().trim().min(1).optional(),
   bundleId: z.string().trim().min(1).optional(),
   accessPassword: z.string().optional().default(""),
+  specialPermissionsPassword: z.string().optional().default(""),
 });
 
 function extractBundleId(input: string): string | null {
@@ -67,16 +72,23 @@ function maxDurationSeconds(link: StoredLink): number {
   );
 }
 
-function publicLink(link: StoredLink) {
+function publicLink(bundleId: string, link: StoredLink) {
   const fallbackIntensity = link.intensityLimit ?? link.maxIntensity;
   const fallbackDuration = maxDurationSeconds(link);
+  const publicId = createPublicLinkId(bundleId, link.uuid);
 
   return {
+    id: publicId,
+
+    // Kept for compatibility with existing OVR module versions. This is an
+    // opaque bundle-local identifier, not the original PiShock UUID.
+    uuid: publicId,
+
     name: link.name,
-    pishockName: link.pishockName,
-    uuid: link.uuid,
+    pishockName: link.name,
     paused: Boolean(link.paused),
     disabled: Boolean(link.disabled),
+    requiresSpecialPermissions: Boolean(link.requiresSpecialPermissions),
     forceLogin: Boolean(link.forceLogin),
     forceWarning: Boolean(link.forceWarning),
     forceWarningLevel: Math.max(1, Math.min(3, Math.round(link.forceWarningLevel ?? 1))),
@@ -125,10 +137,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Bundle not found." }, { status: 404 });
   }
 
+  const links = bundle.links as StoredLink[];
   const requiresPassword = Boolean(bundle.access_password_hash);
   const accessGranted =
     !requiresPassword ||
     verifyAccessPassword(parsed.data.accessPassword, bundle.access_password_hash);
+  const requiresSpecialPermissions = links.some((link) =>
+    Boolean(link.requiresSpecialPermissions),
+  );
+  const specialPermissionsGranted = verifySpecialPermissionsPassword(
+    parsed.data.specialPermissionsPassword,
+    links,
+  );
 
   return NextResponse.json({
     ok: true,
@@ -137,6 +157,15 @@ export async function POST(request: Request) {
     disabled: Boolean(bundle.disabled),
     requiresPassword,
     accessGranted,
-    links: accessGranted ? (bundle.links as StoredLink[]).map(publicLink) : [],
+    requiresSpecialPermissions,
+    specialPermissionsGranted,
+    links: accessGranted
+      ? links
+          .filter(
+            (link) =>
+              !link.requiresSpecialPermissions || specialPermissionsGranted,
+          )
+          .map((link) => publicLink(bundle.id, link))
+      : [],
   });
 }

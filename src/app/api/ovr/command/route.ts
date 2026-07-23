@@ -5,6 +5,8 @@ import WebSocket from "ws";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { verifyAccessPassword } from "@/lib/accessPassword";
+import { createPublicLinkId } from "@/lib/publicBundleLinks";
+import { verifySpecialPermissionsPassword } from "@/lib/specialPermissions";
 
 type StoredLink = {
   name: string;
@@ -32,6 +34,8 @@ type StoredLink = {
   forceWarning?: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  requiresSpecialPermissions?: boolean;
+  specialPermissionsPasswordHash?: string | null;
   paused: boolean;
 };
 
@@ -47,7 +51,8 @@ const commandSchema = z.object({
   bundleId: z.string().trim().min(1),
   username: z.string().trim().min(1).max(32),
   accessPassword: z.string().optional().default(""),
-  target: z.union([z.literal("all"), z.string().uuid()]),
+  specialPermissionsPassword: z.string().optional().default(""),
+  target: z.union([z.literal("all"), z.string().trim().min(16).max(128)]),
   mode: z.enum(["s", "v", "e"]),
   intensity: numberFromJson.optional().default(0),
   durationSeconds: numberFromJson.optional().default(0),
@@ -171,15 +176,42 @@ export async function POST(request: Request) {
   }
 
   const links = bundle.links as StoredLink[];
+  const specialPermissionsGranted = verifySpecialPermissionsPassword(
+    command.specialPermissionsPassword,
+    links,
+  );
   const targetLinks = command.target === "all"
     ? links
-    : links.filter((link) => link.uuid.toLowerCase() === command.target.toLowerCase());
+    : links.filter(
+        (link) => createPublicLinkId(bundle.id, link.uuid) === command.target,
+      );
 
   if (targetLinks.length === 0) {
     return NextResponse.json({ error: "Target shocker not found." }, { status: 404 });
   }
 
-  const usableLinks = targetLinks.filter((link) => allowedForMode(link, command.mode));
+  if (
+    command.target !== "all" &&
+    command.mode !== "e" &&
+    targetLinks[0]?.requiresSpecialPermissions &&
+    !specialPermissionsGranted
+  ) {
+    return NextResponse.json(
+      {
+        error: "Special permissions password required for this shocker.",
+        specialPermissionsRequired: true,
+      },
+      { status: 403 },
+    );
+  }
+
+  const usableLinks = targetLinks.filter(
+    (link) =>
+      allowedForMode(link, command.mode) &&
+      (command.mode === "e" ||
+        !link.requiresSpecialPermissions ||
+        specialPermissionsGranted),
+  );
 
   if (usableLinks.length === 0) {
     return NextResponse.json({ error: "No selected shocker allows this operation." }, { status: 403 });
@@ -223,13 +255,11 @@ export async function POST(request: Request) {
         },
       };
 
-      const result = await publishToPiShock(link.uuid, payload);
+      await publishToPiShock(link.uuid, payload);
 
       return {
-        uuid: link.uuid,
+        id: createPublicLinkId(bundle.id, link.uuid),
         name: link.name,
-        sent: payload,
-        result,
       };
     })
   );
@@ -244,7 +274,7 @@ export async function POST(request: Request) {
 
   const failed = results
     .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-    .map((result) => result.reason instanceof Error ? result.reason.message : "Unknown error");
+    .map(() => "Command failed.");
 
   return NextResponse.json({
     ok: failed.length === 0,
