@@ -29,12 +29,15 @@ type Props = {
   links: StoredLink[];
   requiresPassword: boolean;
   initialDisabled: boolean;
+  initialShowVrControlBanner: boolean;
 };
 
 type CommandMode = "s" | "v" | "e";
 
 type ControllerPolicy = {
   blocked: boolean;
+  specialPermissions: boolean;
+  specialPermissionsBlocked: boolean;
   shockCooldownSeconds: number;
   remainingShockCooldownSeconds: number;
   lastShockAt: string | null;
@@ -72,10 +75,14 @@ export function BundleControlPanel({
   links: initialLinks,
   requiresPassword,
   initialDisabled,
+  initialShowVrControlBanner,
 }: Props) {
   const [bundleTitle, setBundleTitle] = useState(initialTitle);
   const [links, setLinks] = useState<StoredLink[]>(initialLinks);
   const [bundleDisabled, setBundleDisabled] = useState(initialDisabled);
+  const [showVrControlBanner, setShowVrControlBanner] = useState(
+    initialShowVrControlBanner,
+  );
   const [username, setUsername] = useState("");
   const [accessPassword, setAccessPassword] = useState("");
   const [accessGranted, setAccessGranted] = useState(false);
@@ -231,6 +238,10 @@ export function BundleControlPanel({
         }
 
         setBundleDisabled(Boolean(result.disabled));
+
+        if (typeof result.showVrControlBanner === "boolean") {
+          setShowVrControlBanner(result.showVrControlBanner);
+        }
       } catch {
         if (active) {
           setBundleDisabled(true);
@@ -302,11 +313,18 @@ export function BundleControlPanel({
           },
           body: JSON.stringify({
             password: specialPermissionsPassword,
+            accessPassword,
+            sessionId,
+            username: username.trim(),
           }),
         },
       );
 
       const result = await response.json();
+
+      if (result.policy) {
+        setControllerPolicy(result.policy as ControllerPolicy);
+      }
 
       if (!response.ok || !result.ok) {
         throw new Error(
@@ -330,6 +348,16 @@ export function BundleControlPanel({
     [links],
   );
 
+  const managerBlockedSpecialPermissions = Boolean(
+    controllerPolicy?.specialPermissionsBlocked,
+  );
+  const managerGrantedSpecialPermissions = Boolean(
+    controllerPolicy?.specialPermissions && !managerBlockedSpecialPermissions,
+  );
+  const effectiveSpecialPermissionsGranted =
+    !managerBlockedSpecialPermissions &&
+    (specialPermissionsGranted || managerGrantedSpecialPermissions);
+
   useEffect(() => {
     if (!specialPermissionsRequired) {
       setSpecialPermissionsGranted(false);
@@ -338,14 +366,25 @@ export function BundleControlPanel({
     }
   }, [specialPermissionsRequired]);
 
+  useEffect(() => {
+    if (!managerBlockedSpecialPermissions) return;
+
+    setSpecialPermissionsGranted(false);
+    setSpecialPermissionsPassword("");
+    setSpecialPermissionsError(
+      "Special permissions were blocked by the bundle manager.",
+    );
+  }, [managerBlockedSpecialPermissions]);
+
   const selectableLinks = useMemo(() => {
     return links.filter(
       (link) =>
         !link.paused &&
         !link.disabled &&
-        (!link.requiresSpecialPermissions || specialPermissionsGranted),
+        (!link.requiresSpecialPermissions ||
+          effectiveSpecialPermissionsGranted),
     );
-  }, [links, specialPermissionsGranted]);
+  }, [links, effectiveSpecialPermissionsGranted]);
 
   useEffect(() => {
     setSelectedLinkIds((current) => {
@@ -355,7 +394,8 @@ export function BundleControlPanel({
             (link) =>
               !link.paused &&
               !link.disabled &&
-              (!link.requiresSpecialPermissions || specialPermissionsGranted),
+              (!link.requiresSpecialPermissions ||
+          effectiveSpecialPermissionsGranted),
           )
           .map((link) => link.id),
       );
@@ -363,7 +403,7 @@ export function BundleControlPanel({
 
       return next.length === current.length ? current : next;
     });
-  }, [links, specialPermissionsGranted]);
+  }, [links, effectiveSpecialPermissionsGranted]);
 
   const selectedLinks = useMemo(() => {
     return links.filter(
@@ -371,9 +411,10 @@ export function BundleControlPanel({
         selectedLinkIds.includes(link.id) &&
         !link.paused &&
         !link.disabled &&
-        (!link.requiresSpecialPermissions || specialPermissionsGranted),
+        (!link.requiresSpecialPermissions ||
+          effectiveSpecialPermissionsGranted),
     );
-  }, [links, selectedLinkIds, specialPermissionsGranted]);
+  }, [links, selectedLinkIds, effectiveSpecialPermissionsGranted]);
 
   const selectedCount = selectedLinks.length;
   const controllerBlocked = Boolean(controllerPolicy?.blocked);
@@ -525,6 +566,14 @@ export function BundleControlPanel({
       const failed = results.filter((item) => !item.ok);
 
       if (
+        failed.some((item) => Boolean(item.result?.specialPermissionsBlocked))
+      ) {
+        setSpecialPermissionsGranted(false);
+        setSpecialPermissionsPassword("");
+        setSpecialPermissionsError(
+          "Special permissions were blocked by the bundle manager.",
+        );
+      } else if (
         failed.some((item) => Boolean(item.result?.specialPermissionsRequired))
       ) {
         setSpecialPermissionsGranted(false);
@@ -557,6 +606,36 @@ export function BundleControlPanel({
   return (
     <>
       {bundleDisabled && <DisabledBundleDialog title={bundleTitle} />}
+
+      {showVrControlBanner && (
+        <section className="mt-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-50 shadow-lg shadow-cyan-950/20">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-cyan-200">
+                Control from inside VR
+              </h2>
+              <p className="mt-1 text-cyan-100/80">
+                OVR Toolkit users can subscribe to the PiShock Wrist Module on
+                Steam Workshop to control these shockers directly through the
+                OVR Toolkit wristwatch while in-game.
+              </p>
+              <p className="mt-2 text-cyan-100/80">
+                Just follow the instructions in the workshop description to set
+                it up!
+              </p>
+            </div>
+
+            <a
+              href="https://steamcommunity.com/sharedfiles/filedetails/?id=3743157347"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-cyan-300/60 bg-cyan-300 px-4 py-2 font-semibold text-zinc-950 transition hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-zinc-950"
+            >
+              Open Workshop Module
+            </a>
+          </div>
+        </section>
+      )}
 
       {!bundleDisabled && !accessGranted && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
@@ -642,6 +721,19 @@ export function BundleControlPanel({
           </div>
         )}
 
+        {managerBlockedSpecialPermissions && (
+          <div className="mt-4 rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-100">
+            The bundle manager blocked special permissions for this controller.
+            The special permissions password cannot override this block.
+          </div>
+        )}
+
+        {managerGrantedSpecialPermissions && (
+          <div className="mt-4 rounded-lg border border-purple-800 bg-purple-950 px-4 py-3 text-sm text-purple-100">
+            The bundle manager granted this controller special permissions.
+          </div>
+        )}
+
         {controllerTrackingWarning && showAdvanced && (
           <div className="mt-4 rounded-lg border border-yellow-800 bg-yellow-950 px-4 py-3 text-sm text-yellow-100">
             {controllerTrackingWarning}
@@ -663,11 +755,17 @@ export function BundleControlPanel({
               </p>
             </div>
 
-            {specialPermissionsGranted && (
-              <span className="rounded-full border border-green-800 bg-green-950 px-3 py-1.5 text-xs font-medium text-green-200">
-                Special shockers unlocked
+            {managerBlockedSpecialPermissions ? (
+              <span className="rounded-full border border-red-800 bg-red-950 px-3 py-1.5 text-xs font-medium text-red-200">
+                Special rights blocked by manager
               </span>
-            )}
+            ) : effectiveSpecialPermissionsGranted ? (
+              <span className="rounded-full border border-green-800 bg-green-950 px-3 py-1.5 text-xs font-medium text-green-200">
+                {managerGrantedSpecialPermissions
+                  ? "Special rights granted by manager"
+                  : "Special shockers unlocked"}
+              </span>
+            ) : null}
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
@@ -680,20 +778,29 @@ export function BundleControlPanel({
                 setSpecialPermissionsError(null);
               }}
               placeholder="Special permissions password"
-              className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-purple-500"
+              disabled={managerBlockedSpecialPermissions}
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm outline-none focus:border-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
             />
 
             <button
               type="button"
               onClick={unlockSpecialPermissions}
-              disabled={checkingSpecialPermissions}
+              disabled={
+                checkingSpecialPermissions ||
+                managerGrantedSpecialPermissions ||
+                managerBlockedSpecialPermissions
+              }
               className="rounded-lg bg-purple-700 px-5 py-3 text-sm font-semibold hover:bg-purple-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {checkingSpecialPermissions
                 ? "Checking..."
-                : specialPermissionsGranted
-                  ? "Unlocked"
-                  : "Unlock special shockers"}
+                : managerBlockedSpecialPermissions
+                  ? "Blocked by manager"
+                  : managerGrantedSpecialPermissions
+                    ? "Granted by manager"
+                    : specialPermissionsGranted
+                      ? "Unlocked"
+                      : "Unlock special shockers"}
             </button>
           </div>
 
@@ -927,7 +1034,7 @@ export function BundleControlPanel({
             username={username}
             accessPassword={accessPassword}
             specialPermissionsPassword={specialPermissionsPassword}
-            specialPermissionsGranted={specialPermissionsGranted}
+            specialPermissionsGranted={effectiveSpecialPermissionsGranted}
             selected={selectedLinkIds.includes(link.id)}
             onSelectedChange={(selected) => toggleSelected(link.id, selected)}
             showAdvanced={showAdvanced}

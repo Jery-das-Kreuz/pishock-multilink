@@ -53,6 +53,7 @@ type ManagedLink = {
   forceWarning: boolean;
   forceWarningLevel: number;
   disabled: boolean;
+  hidden: boolean;
   requiresSpecialPermissions: boolean;
   paused: boolean;
   activateOnLoad: boolean;
@@ -67,6 +68,7 @@ type BundleData = {
   title: string;
   links: ManagedLink[];
   disabled: boolean;
+  showVrControlBanner?: boolean;
   created_at: string;
   expires_at: string | null;
   hasAccessPassword?: boolean;
@@ -77,6 +79,8 @@ type ControllerSession = {
   sessionId: string;
   username: string;
   blocked: boolean;
+  specialPermissions: boolean;
+  specialPermissionsBlocked: boolean;
   shockCooldownSeconds: number;
   remainingShockCooldownSeconds: number;
   lastShockAt: string | null;
@@ -219,6 +223,7 @@ function normalizeLink(
     forceWarning: Boolean(input.forceWarning),
     forceWarningLevel: normalizeWarningLevel(input.forceWarningLevel),
     disabled: Boolean(input.disabled),
+    hidden: Boolean(input.hidden),
     requiresSpecialPermissions: Boolean(input.requiresSpecialPermissions),
     paused: Boolean(input.paused),
     activateOnLoad: Boolean(input.activateOnLoad),
@@ -263,6 +268,7 @@ function linkFromPiShockInfo(
     forceWarning: Boolean(info.ForceWarning),
     forceWarningLevel: 1,
     disabled: false,
+    hidden: false,
     requiresSpecialPermissions: false,
     paused: info.Paused,
     activateOnLoad: info.ActivateOnLoad,
@@ -276,6 +282,7 @@ function linkFromPiShockInfo(
 function buildSaveStateSnapshot(
   title: string,
   disabled: boolean,
+  showVrControlBanner: boolean,
   links: ManagedLink[],
   newAccessPassword: string,
   clearAccessPassword: boolean,
@@ -285,6 +292,7 @@ function buildSaveStateSnapshot(
   return JSON.stringify({
     title,
     disabled,
+    showVrControlBanner,
     accessPassword: newAccessPassword.trim(),
     clearAccessPassword,
     specialPermissionsPassword: newSpecialPermissionsPassword.trim(),
@@ -299,6 +307,7 @@ function buildSaveStateSnapshot(
       forceWarning: link.forceWarning,
       forceWarningLevel: link.forceWarningLevel,
       disabled: link.disabled,
+      hidden: link.hidden,
       requiresSpecialPermissions: link.requiresSpecialPermissions,
     })),
   });
@@ -311,6 +320,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
 
   const [title, setTitle] = useState("");
   const [disabled, setDisabled] = useState(false);
+  const [showVrControlBanner, setShowVrControlBanner] = useState(true);
   const [links, setLinks] = useState<ManagedLink[]>([]);
 
   const [newLinkName, setNewLinkName] = useState("");
@@ -354,6 +364,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
       buildSaveStateSnapshot(
         title,
         disabled,
+        showVrControlBanner,
         links,
         newAccessPassword,
         clearAccessPassword,
@@ -363,6 +374,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
     [
       title,
       disabled,
+      showVrControlBanner,
       links,
       newAccessPassword,
       clearAccessPassword,
@@ -406,12 +418,14 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
 
         const loadedTitle = String(bundle.title ?? "");
         const loadedDisabled = Boolean(bundle.disabled);
+        const loadedShowVrControlBanner = bundle.showVrControlBanner !== false;
         const loadedLinks = (bundle.links ?? []).map((link) =>
           normalizeLink(link),
         );
 
         setTitle(loadedTitle);
         setDisabled(loadedDisabled);
+        setShowVrControlBanner(loadedShowVrControlBanner);
         setLinks(loadedLinks);
         setHasAccessPassword(Boolean(bundle.hasAccessPassword));
         setNewAccessPassword("");
@@ -425,6 +439,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
           buildSaveStateSnapshot(
             loadedTitle,
             loadedDisabled,
+            loadedShowVrControlBanner,
             loadedLinks,
             "",
             false,
@@ -609,6 +624,8 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
           body: JSON.stringify({
             token,
             blocked: patch.blocked,
+            specialPermissions: patch.specialPermissions,
+            specialPermissionsBlocked: patch.specialPermissionsBlocked,
             shockCooldownSeconds:
               typeof patch.shockCooldownSeconds === "number"
                 ? Math.max(
@@ -696,6 +713,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
           token,
           title,
           disabled,
+          showVrControlBanner,
           accessPassword: newAccessPassword.trim() || undefined,
           clearAccessPassword,
           specialPermissionsPassword:
@@ -714,6 +732,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
             forceWarning: link.forceWarning,
             forceWarningLevel: link.forceWarningLevel,
             disabled: link.disabled,
+            hidden: link.hidden,
             requiresSpecialPermissions: link.requiresSpecialPermissions,
           })),
         }),
@@ -741,6 +760,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
         buildSaveStateSnapshot(
           title,
           disabled,
+          showVrControlBanner,
           links,
           "",
           false,
@@ -924,6 +944,26 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
               </div>
             </div>
 
+            <label className="flex items-center gap-3 rounded-xl border border-cyan-900 bg-zinc-950 p-4">
+              <input
+                type="checkbox"
+                checked={showVrControlBanner}
+                onChange={(event) =>
+                  setShowVrControlBanner(event.target.checked)
+                }
+              />
+
+              <div>
+                <div className="font-medium text-cyan-200">
+                  Show VR control banner
+                </div>
+                <div className="text-sm text-zinc-500">
+                  Show the OVR Toolkit Workshop banner on the public control
+                  page. Disable this to hide it completely.
+                </div>
+              </div>
+            </label>
+
             <label className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
               <input
                 type="checkbox"
@@ -948,7 +988,8 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
               <h2 className="text-xl font-semibold">Live controllers</h2>
               <p className="mt-1 text-sm text-zinc-400">
                 See users who are currently connected, block or re-enable their
-                inputs, and set a per-user shock cooldown.
+                inputs, grant or block special permissions, allow password-based
+                access again, and set a per-user shock cooldown.
               </p>
             </div>
 
@@ -1018,6 +1059,15 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                         ) : (
                           <Badge variant="success">Inputs enabled</Badge>
                         )}
+                        {controller.specialPermissionsBlocked ? (
+                          <Badge variant="danger">
+                            Special rights blocked
+                          </Badge>
+                        ) : controller.specialPermissions ? (
+                          <Badge variant="warning">Special permissions</Badge>
+                        ) : (
+                          <Badge>Special password allowed</Badge>
+                        )}
                       </div>
 
                       <p className="mt-1 text-xs text-zinc-500">
@@ -1036,7 +1086,7 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                       )}
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-[auto_1fr_auto] sm:items-end">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[auto_auto_auto_1fr_auto] xl:items-end">
                       <button
                         type="button"
                         onClick={() =>
@@ -1048,6 +1098,47 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                         className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {controller.blocked ? "Enable inputs" : "Block inputs"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateController(controller.sessionId, {
+                            specialPermissions: !controller.specialPermissions,
+                            specialPermissionsBlocked: false,
+                          })
+                        }
+                        disabled={updatingControllerId === controller.sessionId}
+                        className={
+                          controller.specialPermissions
+                            ? "rounded-lg border border-purple-700 px-4 py-2 text-sm font-medium text-purple-200 hover:bg-purple-950 disabled:cursor-not-allowed disabled:opacity-60"
+                            : "rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        }
+                      >
+                        {controller.specialPermissions
+                          ? "Use password normally"
+                          : "Grant special rights"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateController(controller.sessionId, {
+                            specialPermissions: false,
+                            specialPermissionsBlocked:
+                              !controller.specialPermissionsBlocked,
+                          })
+                        }
+                        disabled={updatingControllerId === controller.sessionId}
+                        className={
+                          controller.specialPermissionsBlocked
+                            ? "rounded-lg border border-green-700 px-4 py-2 text-sm font-medium text-green-200 hover:bg-green-950 disabled:cursor-not-allowed disabled:opacity-60"
+                            : "rounded-lg border border-red-800 px-4 py-2 text-sm font-medium text-red-200 hover:bg-red-950 disabled:cursor-not-allowed disabled:opacity-60"
+                        }
+                      >
+                        {controller.specialPermissionsBlocked
+                          ? "Allow password access"
+                          : "Block special rights"}
                       </button>
 
                       <label className="grid gap-2 text-sm">
@@ -1150,7 +1241,9 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-lg font-semibold">{link.name}</h3>
 
-                    {link.disabled ? (
+                    {link.hidden ? (
+                      <Badge variant="warning">Hidden</Badge>
+                    ) : link.disabled ? (
                       <Badge variant="danger">Disabled</Badge>
                     ) : link.paused ? (
                       <Badge variant="danger">Paused</Badge>
@@ -1180,6 +1273,14 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                       commands for this shocker are blocked after saving.
                     </p>
                   )}
+
+                  {link.hidden && (
+                    <p className="mt-2 text-sm text-purple-200">
+                      Hidden shockers are completely removed from the public
+                      page and from OVR Toolkit after saving. Public commands
+                      are blocked.
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -1195,6 +1296,20 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                     }
                   >
                     {link.disabled ? "Enable shocker" : "Disable shocker"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateLink(link.uuid, { hidden: !link.hidden })
+                    }
+                    className={
+                      link.hidden
+                        ? "rounded-lg border border-purple-700 px-4 py-2 text-sm font-medium text-purple-200 hover:bg-purple-950"
+                        : "rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800"
+                    }
+                  >
+                    {link.hidden ? "Show shocker" : "Hide shocker"}
                   </button>
 
                   <button
@@ -1323,6 +1438,10 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                 <InfoBox
                   label="Special permissions"
                   value={link.requiresSpecialPermissions ? "Required" : "Off"}
+                />
+                <InfoBox
+                  label="Visibility"
+                  value={link.hidden ? "Hidden" : "Visible"}
                 />
                 <InfoBox
                   label="Manager status"
@@ -1536,17 +1655,19 @@ function InfoBox({ label, value }: { label: string; value: string | number }) {
 
 function Badge({
   children,
-  variant,
+  variant = "neutral",
 }: {
   children: ReactNode;
-  variant: "success" | "warning" | "danger";
+  variant?: "success" | "warning" | "danger" | "neutral";
 }) {
   const className =
     variant === "success"
       ? "border-green-800 bg-green-950 text-green-200"
       : variant === "warning"
         ? "border-yellow-800 bg-yellow-950 text-yellow-200"
-        : "border-red-800 bg-red-950 text-red-200";
+        : variant === "danger"
+          ? "border-red-800 bg-red-950 text-red-200"
+          : "border-zinc-700 bg-zinc-900 text-zinc-300";
 
   return (
     <span

@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { verifyAccessPassword } from "@/lib/accessPassword";
 import { createPublicLinkId } from "@/lib/publicBundleLinks";
 import {
+  getControllerSessionsSql,
   getShockCooldownError,
   markControllerShock,
   touchControllerSession,
@@ -43,6 +44,7 @@ type StoredLink = {
   forceWarning: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  hidden?: boolean;
   requiresSpecialPermissions?: boolean;
   specialPermissionsPasswordHash?: string | null;
   paused: boolean;
@@ -169,6 +171,13 @@ export async function POST(
     );
   }
 
+  if (link.hidden) {
+    return respond(
+      { error: "This shocker is not available." },
+      { status: 404 },
+    );
+  }
+
   if (link.disabled) {
     return respond(
       { error: "This shocker is disabled by the bundle manager." },
@@ -178,23 +187,6 @@ export async function POST(
 
   if (link.paused) {
     return respond({ error: "This link is paused." }, { status: 403 });
-  }
-
-  if (
-    command.mode !== "e" &&
-    link.requiresSpecialPermissions &&
-    !verifySpecialPermissionsPassword(command.specialPermissionsPassword, links)
-  ) {
-    const configured = Boolean(getSpecialPermissionsPasswordHash(links));
-    return respond(
-      {
-        error: configured
-          ? "Special permissions password required for this shocker."
-          : "Special permissions are not configured correctly.",
-        specialPermissionsRequired: true,
-      },
-      { status: 403 },
-    );
   }
 
   if (command.mode === "s" && !link.shockEnabled) {
@@ -255,6 +247,65 @@ export async function POST(
     return respond(
       {
         error: "Your controls are blocked by the bundle manager.",
+        controllerPolicy,
+      },
+      { status: 403 },
+    );
+  }
+
+  if (
+    command.mode !== "e" &&
+    link.requiresSpecialPermissions &&
+    (!controllerResult.available || !controllerPolicy)
+  ) {
+    return respond(
+      {
+        error:
+          "Special permissions cannot be verified until controller tracking is configured.",
+        setupSql: getControllerSessionsSql(),
+      },
+      { status: 503 },
+    );
+  }
+
+  if (
+    command.mode !== "e" &&
+    link.requiresSpecialPermissions &&
+    controllerPolicy?.specialPermissionsBlocked
+  ) {
+    return respond(
+      {
+        error: "Special permissions were blocked by the bundle manager.",
+        specialPermissionsBlocked: true,
+        specialPermissionsRequired: true,
+        controllerPolicy,
+      },
+      { status: 403 },
+    );
+  }
+
+  const controllerHasSpecialPermissions = Boolean(
+    controllerPolicy?.specialPermissions &&
+      !controllerPolicy.specialPermissionsBlocked,
+  );
+  const passwordHasSpecialPermissions = verifySpecialPermissionsPassword(
+    command.specialPermissionsPassword,
+    links,
+  );
+
+  if (
+    command.mode !== "e" &&
+    link.requiresSpecialPermissions &&
+    !controllerHasSpecialPermissions &&
+    !passwordHasSpecialPermissions
+  ) {
+    const configured = Boolean(getSpecialPermissionsPasswordHash(links));
+    return respond(
+      {
+        error: configured
+          ? "Special permissions are required for this shocker."
+          : "Special permissions are not configured correctly.",
+        specialPermissionsRequired: true,
         controllerPolicy,
       },
       { status: 403 },

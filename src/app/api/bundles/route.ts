@@ -107,6 +107,7 @@ export async function POST(request: Request) {
           forceWarning: Boolean(info.ForceWarning),
           forceWarningLevel: 1,
           disabled: false,
+          hidden: false,
           requiresSpecialPermissions: false,
           specialPermissionsPasswordHash: null,
           paused: info.Paused,
@@ -152,6 +153,7 @@ export async function POST(request: Request) {
     links: checkedLinks,
     edit_token: editToken,
     access_password_hash: accessPasswordHash,
+    show_vr_control_banner: true,
   });
 
   if (error) {

@@ -34,6 +34,7 @@ type StoredLink = {
   forceWarning?: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  hidden?: boolean;
   requiresSpecialPermissions?: boolean;
   specialPermissionsPasswordHash?: string | null;
   paused: boolean;
@@ -135,7 +136,7 @@ function effectiveMaxDurationSeconds(link: StoredLink, mode: "s" | "v" | "e") {
 }
 
 function allowedForMode(link: StoredLink, mode: "s" | "v" | "e") {
-  if (link.paused || link.disabled) return false;
+  if (link.hidden || link.paused || link.disabled) return false;
   if (mode === "s") return link.shockEnabled;
   if (mode === "v") return link.vibrateEnabled;
   return true;
@@ -181,9 +182,11 @@ export async function POST(request: Request) {
     links,
   );
   const targetLinks = command.target === "all"
-    ? links
+    ? links.filter((link) => !link.hidden)
     : links.filter(
-        (link) => createPublicLinkId(bundle.id, link.uuid) === command.target,
+        (link) =>
+          !link.hidden &&
+          createPublicLinkId(bundle.id, link.uuid) === command.target,
       );
 
   if (targetLinks.length === 0) {

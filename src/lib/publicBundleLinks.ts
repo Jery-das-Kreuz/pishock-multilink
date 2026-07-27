@@ -22,6 +22,7 @@ type StoredLink = {
   forceWarning?: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  hidden?: boolean;
   requiresSpecialPermissions?: boolean;
   paused: boolean;
 };

@@ -13,7 +13,9 @@ export async function GET(
 
   const { data, error } = await supabaseAdmin
     .from("bundles")
-    .select("id, title, links, created_at, expires_at, disabled, access_password_hash")
+    .select(
+      "id, title, links, created_at, expires_at, disabled, access_password_hash, show_vr_control_banner",
+    )
     .eq("id", id)
     .single();
 
@@ -24,13 +26,14 @@ export async function GET(
   return NextResponse.json({
     id: data.id,
     title: data.title,
-    links: (data.links as StoredLink[]).map((link) =>
-      toPublicBundleLink(data.id, link),
-    ),
+    links: (data.links as StoredLink[])
+      .filter((link) => !link.hidden)
+      .map((link) => toPublicBundleLink(data.id, link)),
     created_at: data.created_at,
     expires_at: data.expires_at,
     disabled: Boolean(data.disabled),
     hasAccessPassword: Boolean(data.access_password_hash),
+    showVrControlBanner: data.show_vr_control_banner !== false,
     hasSpecialPermissionsPassword: hasSpecialPermissionsPassword(
       data.links as StoredLink[],
     ),

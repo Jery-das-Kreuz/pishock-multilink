@@ -35,7 +35,9 @@ export default async function BundlePage({ params }: PageProps) {
 
   const { data, error } = await supabaseAdmin
     .from("bundles")
-    .select("id, title, links, created_at, expires_at, disabled, access_password_hash")
+    .select(
+      "id, title, links, created_at, expires_at, disabled, access_password_hash, show_vr_control_banner",
+    )
     .eq("id", id)
     .single();
 
@@ -43,9 +45,9 @@ export default async function BundlePage({ params }: PageProps) {
     notFound();
   }
 
-  const links = (data.links as StoredLink[]).map((link) =>
-    toPublicBundleLink(data.id, link),
-  );
+  const links = (data.links as StoredLink[])
+    .filter((link) => !link.hidden)
+    .map((link) => toPublicBundleLink(data.id, link));
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
@@ -59,36 +61,13 @@ export default async function BundlePage({ params }: PageProps) {
           </p>
         </header>
 
-        <section className="mt-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-50 shadow-lg shadow-cyan-950/20">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-cyan-200">Control from inside VR</h2>
-              <p className="mt-1 text-cyan-100/80">
-                OVR Toolkit users can subscribe to the PiShock Wrist Module on Steam Workshop to control
-                these shockers directly through the OVR Toolkit wristwatch while in-game.
-              </p>
-              <p className="mt-2 text-cyan-100/80">
-                Just follow the instructions in the workshop description to set it up!
-              </p>
-            </div>
-
-            <a
-              href="https://steamcommunity.com/sharedfiles/filedetails/?id=3743157347"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-cyan-300/60 bg-cyan-300 px-4 py-2 font-semibold text-zinc-950 transition hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-zinc-950"
-            >
-              Open Workshop Module
-            </a>
-          </div>
-        </section>
-
         <BundleControlPanel
           bundleId={data.id}
           initialTitle={data.title}
           links={links}
           requiresPassword={Boolean(data.access_password_hash)}
           initialDisabled={Boolean(data.disabled)}
+          initialShowVrControlBanner={data.show_vr_control_banner !== false}
         />
       </div>
     </main>

@@ -42,6 +42,7 @@ const managedLinkSchema = z.object({
   forceWarning: z.boolean().optional().default(false),
   forceWarningLevel: z.number().int().min(1).max(3).optional().default(1),
   disabled: z.boolean().optional().default(false),
+  hidden: z.boolean().optional().default(false),
   requiresSpecialPermissions: z.boolean().optional().default(false),
 });
 
@@ -49,6 +50,7 @@ const updateBundleSchema = z.object({
   token: z.string().min(1),
   title: z.string().trim().min(1).max(80),
   disabled: z.boolean(),
+  showVrControlBanner: z.boolean(),
   accessPassword: z.string().max(100).optional(),
   clearAccessPassword: z.boolean().optional(),
   specialPermissionsPassword: z.string().min(8).max(100).optional(),
@@ -94,7 +96,7 @@ export async function GET(
   const { data, error } = await supabaseAdmin
     .from("bundles")
     .select(
-      "id, title, links, disabled, created_at, expires_at, access_password_hash",
+      "id, title, links, disabled, created_at, expires_at, access_password_hash, show_vr_control_banner",
     )
     .eq("id", id)
     .single();
@@ -110,6 +112,7 @@ export async function GET(
     title: data.title,
     links: removeSpecialPermissionsSecrets(storedLinks),
     disabled: Boolean(data.disabled),
+    showVrControlBanner: data.show_vr_control_banner !== false,
     created_at: data.created_at,
     expires_at: data.expires_at,
     hasAccessPassword: Boolean(data.access_password_hash),
@@ -232,6 +235,7 @@ export async function PUT(
           forceWarning: Boolean(link.forceWarning),
           forceWarningLevel: clamp(link.forceWarningLevel ?? 1, 1, 3),
           disabled: Boolean(link.disabled),
+          hidden: Boolean(link.hidden),
           requiresSpecialPermissions: Boolean(
             link.requiresSpecialPermissions,
           ),
@@ -259,11 +263,13 @@ export async function PUT(
   const updateData: {
     title: string;
     disabled: boolean;
+    show_vr_control_banner: boolean;
     links: unknown;
     access_password_hash?: string | null;
   } = {
     title: parsed.data.title,
     disabled: parsed.data.disabled,
+    show_vr_control_banner: parsed.data.showVrControlBanner,
     links: checkedLinks,
   };
 

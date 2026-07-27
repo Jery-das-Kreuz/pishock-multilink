@@ -33,6 +33,7 @@ type StoredLink = {
   forceWarning?: boolean;
   forceWarningLevel?: number;
   disabled?: boolean;
+  hidden?: boolean;
   requiresSpecialPermissions?: boolean;
   specialPermissionsPasswordHash?: string | null;
   paused: boolean;
@@ -142,8 +143,8 @@ export async function POST(request: Request) {
   const accessGranted =
     !requiresPassword ||
     verifyAccessPassword(parsed.data.accessPassword, bundle.access_password_hash);
-  const requiresSpecialPermissions = links.some((link) =>
-    Boolean(link.requiresSpecialPermissions),
+  const requiresSpecialPermissions = links.some(
+    (link) => !link.hidden && Boolean(link.requiresSpecialPermissions),
   );
   const specialPermissionsGranted = verifySpecialPermissionsPassword(
     parsed.data.specialPermissionsPassword,
@@ -163,7 +164,8 @@ export async function POST(request: Request) {
       ? links
           .filter(
             (link) =>
-              !link.requiresSpecialPermissions || specialPermissionsGranted,
+              !link.hidden &&
+              (!link.requiresSpecialPermissions || specialPermissionsGranted),
           )
           .map((link) => publicLink(bundle.id, link))
       : [],

@@ -8,6 +8,8 @@ export type ControllerSessionPolicy = {
   sessionId: string;
   username: string;
   blocked: boolean;
+  specialPermissions: boolean;
+  specialPermissionsBlocked: boolean;
   shockCooldownSeconds: number;
   lastShockAt: string | null;
   connectedAt: string;
@@ -20,6 +22,8 @@ type SessionRow = {
   session_id: string;
   username: string;
   blocked: boolean | null;
+  special_permissions: boolean | null;
+  special_permissions_blocked: boolean | null;
   shock_cooldown_seconds: number | null;
   last_shock_at: string | null;
   connected_at: string | null;
@@ -40,6 +44,8 @@ export function getControllerSessionsSql(): string {
   session_id text not null,
   username text not null,
   blocked boolean not null default false,
+  special_permissions boolean not null default false,
+  special_permissions_blocked boolean not null default false,
   shock_cooldown_seconds integer not null default 0,
   last_shock_at timestamptz,
   connected_at timestamptz not null default now(),
@@ -47,6 +53,12 @@ export function getControllerSessionsSql(): string {
   user_agent text,
   primary key (bundle_id, session_id)
 );
+
+alter table public.${CONTROLLER_SESSIONS_TABLE}
+  add column if not exists special_permissions boolean not null default false;
+
+alter table public.${CONTROLLER_SESSIONS_TABLE}
+  add column if not exists special_permissions_blocked boolean not null default false;
 
 create index if not exists bundle_controller_sessions_last_seen_idx
   on public.${CONTROLLER_SESSIONS_TABLE} (bundle_id, last_seen_at desc);`;
@@ -75,6 +87,8 @@ function publicPolicy(row: SessionRow): ControllerSessionPolicy {
     sessionId: row.session_id,
     username: row.username,
     blocked: Boolean(row.blocked),
+    specialPermissions: Boolean(row.special_permissions),
+    specialPermissionsBlocked: Boolean(row.special_permissions_blocked),
     shockCooldownSeconds,
     lastShockAt: row.last_shock_at ?? null,
     connectedAt: row.connected_at ?? new Date().toISOString(),
@@ -125,7 +139,7 @@ export async function touchControllerSession(input: {
       { onConflict: "bundle_id,session_id" }
     )
     .select(
-      "bundle_id, session_id, username, blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
     )
     .single();
 
@@ -153,7 +167,7 @@ export async function listActiveControllerSessions(bundleId: string): Promise<{
   const { data, error } = await supabaseAdmin
     .from(CONTROLLER_SESSIONS_TABLE)
     .select(
-      "bundle_id, session_id, username, blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
     )
     .eq("bundle_id", bundleId)
     .gte("last_seen_at", cutoff)
@@ -177,6 +191,8 @@ export async function updateControllerSession(input: {
   bundleId: string;
   sessionId: string;
   blocked?: boolean;
+  specialPermissions?: boolean;
+  specialPermissionsBlocked?: boolean;
   shockCooldownSeconds?: number;
 }): Promise<{
   available: boolean;
@@ -189,6 +205,22 @@ export async function updateControllerSession(input: {
     updateData.blocked = input.blocked;
   }
 
+  if (typeof input.specialPermissions === "boolean") {
+    updateData.special_permissions = input.specialPermissions;
+
+    if (input.specialPermissions) {
+      updateData.special_permissions_blocked = false;
+    }
+  }
+
+  if (typeof input.specialPermissionsBlocked === "boolean") {
+    updateData.special_permissions_blocked = input.specialPermissionsBlocked;
+
+    if (input.specialPermissionsBlocked) {
+      updateData.special_permissions = false;
+    }
+  }
+
   if (typeof input.shockCooldownSeconds === "number") {
     updateData.shock_cooldown_seconds = normalizeCooldown(input.shockCooldownSeconds);
   }
@@ -197,7 +229,7 @@ export async function updateControllerSession(input: {
     const { data, error } = await supabaseAdmin
       .from(CONTROLLER_SESSIONS_TABLE)
       .select(
-        "bundle_id, session_id, username, blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+        "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
       )
       .eq("bundle_id", input.bundleId)
       .eq("session_id", input.sessionId)
@@ -222,7 +254,7 @@ export async function updateControllerSession(input: {
     .eq("bundle_id", input.bundleId)
     .eq("session_id", input.sessionId)
     .select(
-      "bundle_id, session_id, username, blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
     )
     .single();
 

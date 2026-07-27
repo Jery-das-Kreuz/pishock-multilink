@@ -8,6 +8,8 @@ import { getControllerSessionsSql, updateControllerSession } from "@/lib/control
 const updateSchema = z.object({
   token: z.string().min(1),
   blocked: z.boolean().optional(),
+  specialPermissions: z.boolean().optional(),
+  specialPermissionsBlocked: z.boolean().optional(),
   shockCooldownSeconds: z.number().int().min(0).max(3600).optional(),
 });
 
@@ -36,6 +38,8 @@ export async function PUT(
     bundleId: id,
     sessionId,
     blocked: parsed.data.blocked,
+    specialPermissions: parsed.data.specialPermissions,
+    specialPermissionsBlocked: parsed.data.specialPermissionsBlocked,
     shockCooldownSeconds: parsed.data.shockCooldownSeconds,
   });
 
