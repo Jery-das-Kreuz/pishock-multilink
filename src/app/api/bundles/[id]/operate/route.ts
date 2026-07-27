@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import WebSocket from "ws";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getClientIp } from "@/lib/clientIp";
 import { verifyAccessPassword } from "@/lib/accessPassword";
 import { createPublicLinkId } from "@/lib/publicBundleLinks";
 import {
@@ -240,6 +241,7 @@ export async function POST(
     sessionId: controllerId,
     username: safeUsername,
     userAgent: request.headers.get("user-agent"),
+    ipAddress: getClientIp(request),
   });
   const controllerPolicy = controllerResult.policy;
 

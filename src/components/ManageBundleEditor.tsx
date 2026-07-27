@@ -86,6 +86,7 @@ type ControllerSession = {
   lastShockAt: string | null;
   connectedAt: string;
   lastSeenAt: string;
+  ipAddress: string | null;
 };
 
 type Props = {
@@ -1074,6 +1075,10 @@ export function ManageBundleEditor({ bundleId, token }: Props) {
                         Last seen{" "}
                         {new Date(controller.lastSeenAt).toLocaleTimeString()} ·
                         Session {controller.sessionId.slice(0, 8)}
+                      </p>
+
+                      <p className="mt-1 text-xs text-zinc-400">
+                        IP address: {controller.ipAddress ?? "Unavailable"}
                       </p>
 
                       {controller.lastShockAt && (

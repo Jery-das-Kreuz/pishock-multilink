@@ -17,6 +17,10 @@ export type ControllerSessionPolicy = {
   remainingShockCooldownSeconds: number;
 };
 
+export type ControllerSessionAdminView = ControllerSessionPolicy & {
+  ipAddress: string | null;
+};
+
 type SessionRow = {
   bundle_id: string;
   session_id: string;
@@ -28,6 +32,7 @@ type SessionRow = {
   last_shock_at: string | null;
   connected_at: string | null;
   last_seen_at: string | null;
+  ip_address: string | null;
 };
 
 export function sanitizeControllerName(username: string): string {
@@ -51,6 +56,7 @@ export function getControllerSessionsSql(): string {
   connected_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   user_agent text,
+  ip_address text,
   primary key (bundle_id, session_id)
 );
 
@@ -59,6 +65,9 @@ alter table public.${CONTROLLER_SESSIONS_TABLE}
 
 alter table public.${CONTROLLER_SESSIONS_TABLE}
   add column if not exists special_permissions_blocked boolean not null default false;
+
+alter table public.${CONTROLLER_SESSIONS_TABLE}
+  add column if not exists ip_address text;
 
 create index if not exists bundle_controller_sessions_last_seen_idx
   on public.${CONTROLLER_SESSIONS_TABLE} (bundle_id, last_seen_at desc);`;
@@ -100,6 +109,13 @@ function publicPolicy(row: SessionRow): ControllerSessionPolicy {
   };
 }
 
+function adminView(row: SessionRow): ControllerSessionAdminView {
+  return {
+    ...publicPolicy(row),
+    ipAddress: row.ip_address ?? null,
+  };
+}
+
 export function isLikelyMissingControllerTable(error: { code?: string; message?: string } | null) {
   if (!error) return false;
 
@@ -118,6 +134,7 @@ export async function touchControllerSession(input: {
   sessionId: string;
   username: string;
   userAgent?: string | null;
+  ipAddress?: string | null;
 }): Promise<{
   available: boolean;
   policy: ControllerSessionPolicy | null;
@@ -126,20 +143,23 @@ export async function touchControllerSession(input: {
   const now = new Date().toISOString();
   const username = sanitizeControllerName(input.username);
 
+  const sessionData: Record<string, unknown> = {
+    bundle_id: input.bundleId,
+    session_id: input.sessionId,
+    username,
+    last_seen_at: now,
+    user_agent: input.userAgent ?? null,
+  };
+
+  if (input.ipAddress) {
+    sessionData.ip_address = input.ipAddress;
+  }
+
   const { data, error } = await supabaseAdmin
     .from(CONTROLLER_SESSIONS_TABLE)
-    .upsert(
-      {
-        bundle_id: input.bundleId,
-        session_id: input.sessionId,
-        username,
-        last_seen_at: now,
-        user_agent: input.userAgent ?? null,
-      },
-      { onConflict: "bundle_id,session_id" }
-    )
+    .upsert(sessionData, { onConflict: "bundle_id,session_id" })
     .select(
-      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at, ip_address"
     )
     .single();
 
@@ -159,7 +179,7 @@ export async function touchControllerSession(input: {
 
 export async function listActiveControllerSessions(bundleId: string): Promise<{
   available: boolean;
-  sessions: ControllerSessionPolicy[];
+  sessions: ControllerSessionAdminView[];
   error?: string;
 }> {
   const cutoff = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
@@ -167,7 +187,7 @@ export async function listActiveControllerSessions(bundleId: string): Promise<{
   const { data, error } = await supabaseAdmin
     .from(CONTROLLER_SESSIONS_TABLE)
     .select(
-      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at, ip_address"
     )
     .eq("bundle_id", bundleId)
     .gte("last_seen_at", cutoff)
@@ -183,7 +203,7 @@ export async function listActiveControllerSessions(bundleId: string): Promise<{
 
   return {
     available: true,
-    sessions: ((data ?? []) as SessionRow[]).map(publicPolicy),
+    sessions: ((data ?? []) as SessionRow[]).map(adminView),
   };
 }
 
@@ -196,7 +216,7 @@ export async function updateControllerSession(input: {
   shockCooldownSeconds?: number;
 }): Promise<{
   available: boolean;
-  session: ControllerSessionPolicy | null;
+  session: ControllerSessionAdminView | null;
   error?: string;
 }> {
   const updateData: Record<string, unknown> = {};
@@ -229,7 +249,7 @@ export async function updateControllerSession(input: {
     const { data, error } = await supabaseAdmin
       .from(CONTROLLER_SESSIONS_TABLE)
       .select(
-        "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+        "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at, ip_address"
       )
       .eq("bundle_id", input.bundleId)
       .eq("session_id", input.sessionId)
@@ -245,7 +265,7 @@ export async function updateControllerSession(input: {
       };
     }
 
-    return { available: true, session: publicPolicy(data as SessionRow) };
+    return { available: true, session: adminView(data as SessionRow) };
   }
 
   const { data, error } = await supabaseAdmin
@@ -254,7 +274,7 @@ export async function updateControllerSession(input: {
     .eq("bundle_id", input.bundleId)
     .eq("session_id", input.sessionId)
     .select(
-      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at"
+      "bundle_id, session_id, username, blocked, special_permissions, special_permissions_blocked, shock_cooldown_seconds, last_shock_at, connected_at, last_seen_at, ip_address"
     )
     .single();
 
@@ -268,7 +288,7 @@ export async function updateControllerSession(input: {
     };
   }
 
-  return { available: true, session: publicPolicy(data as SessionRow) };
+  return { available: true, session: adminView(data as SessionRow) };
 }
 
 export async function markControllerShock(bundleId: string, sessionId?: string | null) {

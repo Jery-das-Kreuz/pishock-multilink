@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getClientIp } from "@/lib/clientIp";
 import { verifyAccessPassword } from "@/lib/accessPassword";
 import { touchControllerSession } from "@/lib/controllerSessions";
 import {
@@ -68,6 +69,7 @@ export async function POST(
     sessionId: controllerId,
     username: parsed.data.username,
     userAgent: request.headers.get("user-agent"),
+    ipAddress: getClientIp(request),
   });
 
   return respond({
