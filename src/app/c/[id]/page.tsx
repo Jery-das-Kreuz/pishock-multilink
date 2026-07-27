@@ -49,9 +49,9 @@ export default async function BundlePage({ params }: PageProps) {
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="mx-auto max-w-4xl px-6 py-10">
-        <header className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <h1 className="text-3xl font-bold">{data.title}</h1>
+      <div className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <header className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <h1 className="text-2xl font-bold sm:text-3xl">{data.title}</h1>
 
           <p className="mt-3 text-sm text-zinc-400">
             Control the configured devices from one protected interface. All
@@ -59,7 +59,7 @@ export default async function BundlePage({ params }: PageProps) {
           </p>
         </header>
 
-        <section className="mt-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-5 text-sm text-cyan-50 shadow-lg shadow-cyan-950/20">
+        <section className="mt-4 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4 text-sm text-cyan-50 shadow-lg shadow-cyan-950/20">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-cyan-200">Control from inside VR</h2>

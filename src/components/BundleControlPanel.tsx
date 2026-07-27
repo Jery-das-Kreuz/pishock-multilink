@@ -918,7 +918,7 @@ export function BundleControlPanel({
         </section>
       )}
 
-      <section className="mt-6 grid gap-4">
+      <section className="mt-5 grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         {links.map((link) => (
           <LinkControlCard
             key={link.id}

@@ -166,105 +166,104 @@ export function LinkControlCard({
   }
 
   return (
-    <article className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-        <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selected}
-                disabled={
-                  managerDisabled || link.paused || specialPermissionLocked
-                }
-                onChange={(event) => onSelectedChange(event.target.checked)}
-              />
-              <span>Select</span>
-            </label>
+    <article className="flex h-full min-w-0 flex-col rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+      <header className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <label className="flex shrink-0 items-center gap-1.5 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={selected}
+              disabled={
+                managerDisabled || link.paused || specialPermissionLocked
+              }
+              onChange={(event) => onSelectedChange(event.target.checked)}
+            />
+            <span>Select</span>
+          </label>
 
-            <h2 className="text-xl font-semibold">{link.name}</h2>
+          <h2 className="min-w-0 text-lg font-semibold leading-tight">
+            {link.name}
+          </h2>
 
-            {managerDisabled ? (
-              <Badge variant="danger">Disabled</Badge>
-            ) : link.paused ? (
-              <Badge variant="danger">Paused</Badge>
-            ) : (
-              <Badge variant="success">Active</Badge>
-            )}
+          {managerDisabled ? (
+            <Badge variant="danger">Disabled</Badge>
+          ) : link.paused ? (
+            <Badge variant="danger">Paused</Badge>
+          ) : (
+            <Badge variant="success">Active</Badge>
+          )}
 
-            {link.forceLogin && <Badge variant="warning">Login required</Badge>}
-            {link.requiresSpecialPermissions && (
-              <Badge
-                variant={specialPermissionsGranted ? "success" : "warning"}
-              >
-                {specialPermissionsGranted
-                  ? "Special access unlocked"
-                  : "Special permissions required"}
-              </Badge>
-            )}
-            {forcedWarning && (
-              <Badge variant="warning">
-                Warning Duration {forcedWarningLevel}
-              </Badge>
-            )}
-          </div>
+          {link.forceLogin && <Badge variant="warning">Login required</Badge>}
+          {link.requiresSpecialPermissions && (
+            <Badge
+              variant={specialPermissionsGranted ? "success" : "warning"}
+            >
+              {specialPermissionsGranted
+                ? "Special access unlocked"
+                : "Special permissions required"}
+            </Badge>
+          )}
+          {forcedWarning && (
+            <Badge variant="warning">
+              Warning duration {forcedWarningLevel}
+            </Badge>
+          )}
+        </div>
 
-
+        <div className="mt-2 grid gap-1 text-xs leading-relaxed">
           {managerDisabled && (
-            <p className="mt-2 text-sm text-red-300">
+            <p className="text-red-300">
               This shocker is disabled by the bundle manager.
             </p>
           )}
 
           {!username.trim() && (
-            <p className="mt-2 text-sm text-yellow-300">
+            <p className="text-yellow-300">
               Enter a display name above to enable controls.
             </p>
           )}
 
           {controllerBlocked && (
-            <p className="mt-2 text-sm text-red-300">
+            <p className="text-red-300">
               Your inputs are currently blocked by the bundle manager.
             </p>
           )}
 
           {specialPermissionLocked && (
-            <p className="mt-2 text-sm text-purple-200">
+            <p className="text-purple-200">
               Enter the special permissions password above to unlock this
-              shocker. The Stop command remains available.
+              shocker. Stop remains available.
             </p>
           )}
 
           {forcedWarning && (
-            <p className="mt-2 text-sm text-yellow-200">
-              The manager requires shock warning duration {forcedWarningLevel} for
-              this shocker.
+            <p className="text-yellow-200">
+              Warning duration {forcedWarningLevel} is required by the manager.
             </p>
           )}
 
           {shockCooldownRemaining > 0 && (
-            <p className="mt-2 text-sm text-yellow-300">
-              Shock is on cooldown for {shockCooldownRemaining}s.
+            <p className="text-yellow-300">
+              Shock cooldown: {shockCooldownRemaining}s.
             </p>
           )}
         </div>
+      </header>
 
-      </div>
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <section className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-          <h3 className="font-semibold">Vibrate</h3>
+      <div className="mt-3 grid flex-1 gap-3 sm:grid-cols-2">
+        <section className="flex min-w-0 flex-col rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+          <h3 className="text-sm font-semibold">Vibrate</h3>
 
           {!link.vibrateEnabled ? (
-            <p className="mt-3 text-sm text-zinc-500">
+            <p className="mt-2 text-xs text-zinc-500">
               Vibrate is not allowed for this link.
             </p>
           ) : (
-            <div className="mt-4 grid gap-4">
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-3 text-sm">
+            <div className="mt-3 flex flex-1 flex-col gap-3">
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="text-zinc-300">Intensity</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <span className="font-mono">{vibrateIntensity}</span>
                     <button
                       type="button"
@@ -273,7 +272,7 @@ export function LinkControlCard({
                           randomIntensity(vibrateMaxIntensity),
                         )
                       }
-                      className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+                      className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-medium text-zinc-200 hover:bg-zinc-800"
                     >
                       Randomise
                     </button>
@@ -289,11 +288,12 @@ export function LinkControlCard({
                     setVibrateIntensity(Number(event.target.value))
                   }
                   aria-label="Vibrate intensity"
+                  className="w-full"
                 />
               </div>
 
-              <label className="grid gap-2">
-                <div className="flex justify-between text-sm">
+              <label className="grid gap-1.5">
+                <div className="flex justify-between text-xs">
                   <span className="text-zinc-300">Duration</span>
                   <span className="font-mono">{vibrateDuration} s</span>
                 </div>
@@ -307,6 +307,7 @@ export function LinkControlCard({
                   onChange={(event) =>
                     setVibrateDuration(Number(event.target.value))
                   }
+                  className="w-full"
                 />
               </label>
 
@@ -320,7 +321,7 @@ export function LinkControlCard({
                   })
                 }
                 disabled={protectedControlDisabled || loadingMode !== null}
-                className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-auto rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loadingMode === "v" ? "Sending..." : "Vibrate"}
               </button>
@@ -328,26 +329,26 @@ export function LinkControlCard({
           )}
         </section>
 
-        <section className="rounded-xl border border-red-900 bg-zinc-950 p-4">
-          <h3 className="font-semibold text-red-200">Shock</h3>
+        <section className="flex min-w-0 flex-col rounded-xl border border-red-900 bg-zinc-950 p-3">
+          <h3 className="text-sm font-semibold text-red-200">Shock</h3>
 
           {!link.shockEnabled ? (
-            <p className="mt-3 text-sm text-zinc-500">
+            <p className="mt-2 text-xs text-zinc-500">
               Shock is not allowed for this link.
             </p>
           ) : (
-            <div className="mt-4 grid gap-4">
-              <div className="grid gap-2">
-                <div className="flex items-center justify-between gap-3 text-sm">
+            <div className="mt-3 flex flex-1 flex-col gap-3">
+              <div className="grid gap-1.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="text-zinc-300">Intensity</span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <span className="font-mono">{shockIntensity}</span>
                     <button
                       type="button"
                       onClick={() =>
                         setShockIntensity(randomIntensity(shockMaxIntensity))
                       }
-                      className="rounded-md border border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+                      className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-medium text-zinc-200 hover:bg-zinc-800"
                     >
                       Randomise
                     </button>
@@ -363,11 +364,12 @@ export function LinkControlCard({
                     setShockIntensity(Number(event.target.value))
                   }
                   aria-label="Shock intensity"
+                  className="w-full"
                 />
               </div>
 
-              <label className="grid gap-2">
-                <div className="flex justify-between text-sm">
+              <label className="grid gap-1.5">
+                <div className="flex justify-between text-xs">
                   <span className="text-zinc-300">Duration</span>
                   <span className="font-mono">{shockDuration} s</span>
                 </div>
@@ -381,11 +383,12 @@ export function LinkControlCard({
                   onChange={(event) =>
                     setShockDuration(Number(event.target.value))
                   }
+                  className="w-full"
                 />
               </label>
 
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-                <label className="flex items-center gap-3 text-sm">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-2.5">
+                <label className="flex items-center gap-2 text-xs">
                   <input
                     type="checkbox"
                     checked={forcedWarning || shockWarning}
@@ -400,8 +403,8 @@ export function LinkControlCard({
                 </label>
 
                 {(forcedWarning || shockWarning) && (
-                  <label className="mt-3 grid gap-2 text-sm">
-                    <span className="text-zinc-300">Warning Duration</span>
+                  <label className="mt-2 grid gap-1.5 text-xs">
+                    <span className="text-zinc-300">Warning duration</span>
 
                     <select
                       value={
@@ -411,7 +414,7 @@ export function LinkControlCard({
                       onChange={(event) =>
                         setShockWarningLevel(Number(event.target.value))
                       }
-                      className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 outline-none focus:border-blue-500"
+                      className="rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 outline-none focus:border-blue-500"
                     >
                       <option value={1}>Short</option>
                       <option value={2}>Medium</option>
@@ -433,7 +436,7 @@ export function LinkControlCard({
                   })
                 }
                 disabled={shockDisabled || loadingMode !== null}
-                className="rounded-lg bg-red-700 px-5 py-3 text-sm font-semibold hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-auto rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {loadingMode === "s" ? "Sending..." : "Shock"}
               </button>
@@ -445,14 +448,14 @@ export function LinkControlCard({
       <button
         onClick={() => sendCommand("e")}
         disabled={baseDisabled || loadingMode !== null}
-        className="mt-4 rounded-lg border border-zinc-700 px-5 py-3 text-sm font-semibold hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-3 w-full rounded-lg border border-zinc-700 px-3 py-2 text-sm font-semibold hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {loadingMode === "e" ? "Stopping..." : "Stop"}
       </button>
 
       {showAdvanced && (
         <>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             <InfoBox
               label="Shock"
               value={link.shockEnabled ? "Allowed" : "Off"}
@@ -490,7 +493,7 @@ export function LinkControlCard({
           </div>
 
           {message && (
-            <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-3 text-sm text-zinc-200">
+            <div className="mt-3 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs text-zinc-200">
               {message}
             </div>
           )}
@@ -502,11 +505,11 @@ export function LinkControlCard({
 
 function InfoBox({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
+      <div className="text-[10px] uppercase tracking-wide text-zinc-500">
         {label}
       </div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
+      <div className="mt-0.5 break-words text-xs font-medium">{value}</div>
     </div>
   );
 }
@@ -527,7 +530,7 @@ function Badge({
 
   return (
     <span
-      className={`rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
+      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${className}`}
     >
       {children}
     </span>
